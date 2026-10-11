@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Chrome AI WebMCP icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="20" fill="url(#bg)"/>
+  <circle cx="45" cy="64" r="24" fill="#ffffff" opacity="0.92"/>
+  <path d="M57 28h22l17 17v26c0 12-10 22-22 22H57c-12 0-22-10-22-22V50c0-12 10-22 22-22Zm6 20h11v9H63zm0 18h22v9H63zm0 18h22v9H63z" fill="#dfe7f6"/>
+  <path d="M77 48h18v11H77zM77 66h18v11H77z" fill="#1d4ed8"/>
+</svg>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Chrome AI WebMCP Prototype</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Prototype</p>
+          <h1>Chrome AI + WebMCP</h1>
+        </div>
+        <button id="themeToggle" type="button" class="ghost-button">Toggle theme</button>
+      </header>
+
+      <main class="layout">
+        <section class="panel prompt-panel">
+          <div class="panel-header">
+            <h2>Prompt Studio</h2>
+            <span id="aiStatus" class="chip neutral">Checking AI support…</span>
+          </div>
+
+          <label for="modelPreference">Model preference</label>
+          <select id="modelPreference">
+            <option value="local">Local model</option>
+            <option value="prompt-api">Prompt API</option>
+            <option value="demo">Demo fallback</option>
+          </select>
+
+          <label for="promptInput">Instruction</label>
+          <textarea id="promptInput" rows="6" placeholder="Ask the page or browser to take action, summarize the page, or inspect the current document."></textarea>
+
+          <div class="button-row">
+            <button id="runPromptBtn" type="button">Run prompt</button>
+            <button id="highlightBtn" type="button" class="secondary-button">Highlight page</button>
+            <button id="savePrefsBtn" type="button" class="secondary-button">Save preferences</button>
+          </div>
+
+          <div class="inline-field">
+            <label for="highlightSelectorInput">Selector override</label>
+            <input id="highlightSelectorInput" type="text" value="body" placeholder="body or .target-class" />
+          </div>
+
+          <div id="status" class="status" role="status" aria-live="polite">Ready.</div>
+        </section>
+
+        <aside class="panel actions-panel">
+          <h3>WebMCP tools</h3>
+          <ul id="toolList" class="tool-list">
+            <li><strong>summarizePage</strong><span>Summarize the current page and the user task.</span></li>
+            <li><strong>highlightSelector</strong><span>Draw a visual highlight around a target element.</span></li>
+            <li><strong>readSelection</strong><span>Return the current selected text if available.</span></li>
+          </ul>
+          <button id="clearHistoryBtn" type="button" class="secondary-button full-width">Clear stored history</button>
+        </aside>
+      </main>
+
+      <section class="panel results-panel">
+        <h2>Output</h2>
+        <pre id="responseOutput" class="response-output">No output yet.</pre>
+      </section>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
