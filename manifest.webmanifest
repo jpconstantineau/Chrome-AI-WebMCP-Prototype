@@ -1,0 +1,17 @@
+{
+  "name": "Chrome AI WebMCP Prototype",
+  "short_name": "AI WebMCP",
+  "description": "A minimal prototype that combines Chrome's Prompt API with WebMCP-inspired browser actions.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
