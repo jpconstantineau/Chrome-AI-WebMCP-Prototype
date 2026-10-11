@@ -1,11 +1,12 @@
 {
-  "name": "Chrome AI WebMCP Prototype",
-  "short_name": "AI WebMCP",
-  "description": "A minimal prototype that combines Chrome's Prompt API with WebMCP-inspired browser actions.",
+  "name": "Local lists — Chrome AI + WebMCP",
+  "short_name": "Local lists",
+  "description": "Browser-local lists and an AI-assisted weekly review through native Prompt API and WebMCP.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "scope": "./",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0f0f0f",
   "icons": [
     {
       "src": "./icon-192.png",
