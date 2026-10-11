@@ -1,12 +1,13 @@
 # Design
 
-Keep the visual design intentionally minimal and boilerplate. This app should use a clean, single-page layout with low visual noise and clear content sections.
+Keep the visual design intentionally simple, flexible, and prototype-friendly. This app should feel like a clean browser control panel rather than a polished consumer application.
 
 Requirements:
-- Use a simple card-based layout with a top bar, prompt panel, and output panel.
-- Keep the color palette restrained and easy to theme.
-- Favor readable typography and clear spacing over decorative styling.
-- Provide a dark-mode toggle and keep the layout responsive for mobile and desktop.
-- Leave the interface easy to update later to match more specific maintainer preferences.
+- Use a minimal single-page layout with a top bar, a prompt editor panel, and a results/output panel.
+- Favor clear card sections and enough spacing to keep the UI readable on both desktop and mobile.
+- Maintain a restrained neutral palette with a single accent color for actions and status states.
+- Support both light and dark themes using CSS variables, with the dark theme tuned for comfortable night viewing.
+- Keep the interface adaptable so the maintainer can later refine typography, layout density, and branding without rewriting the app structure.
+- Emphasize browser-native behavior and plain HTML/CSS/JS so the prototype remains easy to run locally and on GitHub Pages.
 
-The purpose of the design is to support experimentation rather than finalize a polished product. It should remain flexible enough to evolve without large framework or styling changes.
+The goal is to keep the app minimal enough for experimentation with local AI and WebMCP workflows while still presenting a clear, usable interface for testing ideas.

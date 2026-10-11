@@ -26,6 +26,10 @@ Then visit `http://localhost:8000`.
 
 A GitHub Actions workflow is included in `.github/workflows/pages.yml` for simple static deployment to GitHub Pages.
 
+Expected deployment URL:
+
+https://jpconstantineau.github.io/Chrome-AI-WebMCP-Prototype/
+
 ## Guidance files
 
 - `agents.md` – agent instructions
