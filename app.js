@@ -37,8 +37,9 @@ function setAiStatus(text, stateName = 'neutral') {
 function applyTheme(themeName) {
   const isDark = themeName === 'dark';
   document.body.classList.toggle('dark', isDark);
+  document.body.classList.toggle('light', !isDark);
   state.theme = themeName;
-  elements.themeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
+  elements.themeToggle.textContent = isDark ? 'Switch to light mode' : 'Switch to dark mode';
 }
 
 function openDatabase() {
@@ -364,7 +365,7 @@ async function initialize() {
   }
 
   if (!prefs.theme) {
-    applyTheme('light');
+    applyTheme('dark');
   }
 
   elements.themeToggle.addEventListener('click', () => {
