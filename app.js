@@ -18,6 +18,7 @@ const elements = {
   highlightBtn: document.getElementById('highlightBtn'),
   savePrefsBtn: document.getElementById('savePrefsBtn'),
   clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+  highlightSelectorInput: document.getElementById('highlightSelectorInput'),
   status: document.getElementById('status'),
   responseOutput: document.getElementById('responseOutput'),
   aiStatus: document.getElementById('aiStatus')
@@ -137,6 +138,10 @@ async function loadPreferences() {
       elements.promptInput.value = merged.promptInput;
     }
 
+    if (merged.highlightSelectorInput) {
+      elements.highlightSelectorInput.value = merged.highlightSelectorInput;
+    }
+
     return merged;
   } catch (error) {
     if (directPrefs.theme) {
@@ -148,6 +153,9 @@ async function loadPreferences() {
     if (directPrefs.promptInput) {
       elements.promptInput.value = directPrefs.promptInput;
     }
+    if (directPrefs.highlightSelectorInput) {
+      elements.highlightSelectorInput.value = directPrefs.highlightSelectorInput;
+    }
     return directPrefs;
   }
 }
@@ -157,12 +165,17 @@ async function savePreferences() {
     id: 'settings',
     theme: state.theme,
     modelPreference: elements.modelPreference.value,
-    promptInput: elements.promptInput.value
+    promptInput: elements.promptInput.value,
+    highlightSelectorInput: elements.highlightSelectorInput.value
   };
 
-  localStorage.setItem('chrome-ai-webmcp-preferences', JSON.stringify(preferences));
-  await writeToStore(STORE_NAMES.preferences, preferences);
-  setStatus('Preferences saved locally.', true);
+  try {
+    localStorage.setItem('chrome-ai-webmcp-preferences', JSON.stringify(preferences));
+    await writeToStore(STORE_NAMES.preferences, preferences);
+    setStatus('Preferences saved locally.', true);
+  } catch (error) {
+    setStatus(`Unable to save preferences: ${error.message || 'unknown storage error'}`);
+  }
 }
 
 async function loadHistory() {
@@ -176,7 +189,6 @@ async function loadHistory() {
 
 async function appendHistory(prompt, response) {
   const entry = {
-    id: Date.now(),
     prompt,
     response,
     createdAt: new Date().toISOString()
@@ -188,10 +200,8 @@ async function appendHistory(prompt, response) {
 function detectPromptApi() {
   const candidates = [
     navigator.languageModel,
-    window.ai,
-    window.navigator?.languageModel
+    window.ai
   ];
-
   const supported = candidates.find(Boolean);
   return supported || null;
 }
@@ -240,8 +250,12 @@ async function invokePromptApi(promptText) {
 }
 
 async function readPageSelection() {
-  const selection = window.getSelection && window.getSelection();
-  return selection ? selection.toString().trim() : '';
+  if (!window.getSelection) {
+    return '';
+  }
+
+  const selection = window.getSelection();
+  return selection && selection.toString ? selection.toString().trim() : '';
 }
 
 async function runWebMCPAction(toolName, args = {}) {
@@ -261,12 +275,12 @@ async function runWebMCPAction(toolName, args = {}) {
       const selector = args.selector || 'body';
       const target = document.querySelector(selector) || document.body;
       const previousOutline = target.style.outline;
-      const previousOutlineColor = target.style.outlineColor;
+      const previousOutlineOffset = target.style.outlineOffset;
       target.style.outline = '3px solid #10b981';
       target.style.outlineOffset = '4px';
       setTimeout(() => {
         target.style.outline = previousOutline;
-        target.style.outlineColor = previousOutlineColor;
+        target.style.outlineOffset = previousOutlineOffset;
       }, 1600);
       return `Highlighted ${selector}.`;
     },
@@ -315,7 +329,7 @@ async function handlePromptSubmission() {
 }
 
 async function handleHighlightAction() {
-  const selector = prompt('Which selector would you like to highlight? Leave empty for the page body.', 'body');
+  const selector = (elements.highlightSelectorInput.value || 'body').trim();
   try {
     const result = await runWebMCPAction('highlightSelector', { selector: selector || 'body' });
     elements.responseOutput.textContent = result;
@@ -333,7 +347,13 @@ async function clearHistory() {
 }
 
 async function initialize() {
-  await openDatabase();
+  try {
+    await openDatabase();
+  } catch (error) {
+    console.warn('IndexedDB unavailable, continuing in degraded mode:', error);
+    setStatus('IndexedDB unavailable; app will use localStorage only.');
+  }
+
   const prefs = await loadPreferences();
 
   const promptApi = detectPromptApi();

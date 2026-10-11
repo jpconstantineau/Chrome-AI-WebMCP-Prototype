@@ -133,13 +133,18 @@ label {
 }
 
 select,
-textarea {
+textarea,
+input {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: transparent;
   color: var(--text);
   padding: 12px 14px;
+}
+
+.inline-field {
+  margin-top: 16px;
 }
 
 textarea {
