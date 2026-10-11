@@ -2,8 +2,8 @@
 
 This repository uses the following guidance files:
 
-- `intent.md` explains the product intent and expected prototype behavior.
-- `design.md` defines the minimal user interface direction and visual goals.
+- `INTENT.md` explains the product intent and expected prototype behavior.
+- `DESIGN.md` defines the minimal user interface direction and visual goals.
 
 When making changes, agents should read both files before updating implementation details. Keep the app minimal, static, and browser-only, and do not introduce server-side dependencies or backend APIs.
 
