@@ -3,12 +3,13 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 let browser;
 async function open(responses) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await context.addInitScript(fixture, { legacyArguments: true });
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(responses => fixture.responses.push(...responses), responses);
   return { context, page };
 }

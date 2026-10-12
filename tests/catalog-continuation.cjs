@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 const URL = process.env.APP_URL || 'http://127.0.0.1:8765';
 let browser;
 (async () => {
@@ -11,7 +12,7 @@ let browser;
     await context.addInitScript(fixture, options);
     const page = await context.newPage(); await page.goto(URL);
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.locator('#workspace').waitFor({ state: 'visible' });
+    await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     await page.evaluate(async () => {
       const { openDatabase, put } = await import('./storage.js');
       const db = await openDatabase(() => {});

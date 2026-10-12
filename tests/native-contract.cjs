@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 let browser;
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
@@ -10,7 +11,7 @@ let browser;
     const page = await context.newPage();
     await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.locator('#workspace').waitFor({ state: 'visible' });
+    await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     await page.evaluate(() => fixture.responses.push({ message: 'Inspecting attributes.', tool: { name: 'list_attributes', arguments: {} } }));
     await page.locator('#message').fill('Inspect attributes.');
     await page.locator('#send').click();
@@ -43,7 +44,7 @@ let browser;
     assert.equal(await page.evaluate(() => fixture.prompts[4].input.tools.every(tool => !Object.hasOwn(tool, 'inputSchema'))), true);
     await page.reload();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.locator('#workspace').waitFor({ state: 'visible' });
+    await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     assert.equal(await page.locator('.item-row').filter({ hasText: 'Native contract regression' }).count(), 1);
     assert.match(await page.locator('#chat').innerText(), /Tool stopped: Tool permission denied/);
     await context.close();

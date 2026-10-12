@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 let browser;
 async function approveTurn(page) {
   for (let rounds = 0; rounds < 20; rounds++) {
@@ -16,7 +17,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
   for (const options of [{ legacyArguments: true }, { nativeToolUse: true, legacyArguments: true, idKey: 'callID' }, { nativeToolUse: true, idKey: 'callId' }]) {
     const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options);
     const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     await page.evaluate(async () => {
       const { openDatabase, mutate } = await import('./storage.js'); const db = await openDatabase(() => {});
       const task = await mutate(db, { kind: 'create', patch: { title: 'Research for new car', description: 'Compare total cost and reliability', context: '@Home' } }); db.close(); fixture.research = task;
@@ -52,7 +53,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
     assert.equal(research.status, 'Completed'); assert.equal(research.title, 'Research for new car'); assert.equal(research.description, 'Compare total cost and reliability'); assert.equal(research.context, '@Home');
     assert.equal(await page.evaluate(() => fixture.executions.filter(call => call.name === 'complete_task').length), 1);
     if (options.nativeToolUse) {
-      assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools.length), 16);
+      assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools), undefined, 'Startup is text-only even when typed interfaces exist'); assert.equal(await page.evaluate(() => fixture.registrations.length), 16); assert(await page.evaluate(() => fixture.modelSettings.some(settings => settings.tools?.some(tool => tool.name === 'complete_task'))));
       assert.equal(await page.evaluate(() => fixture.prompts.some(prompt => prompt.constrained)), false);
       const identities = await page.evaluate(() => fixture.prompts.flatMap(prompt => Array.isArray(prompt.messages) ? prompt.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'tool-response').map(part => part.value[fixture.options.idKey]) : []) : []));
       assert.equal(identities.length, 3); assert.equal(new Set(identities).size, 3);

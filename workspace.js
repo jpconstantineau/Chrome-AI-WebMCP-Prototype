@@ -34,8 +34,9 @@ export function validateItem(patch, items, previous = null) {
   }
   return item;
 }
+export function inInbox(item) { return item.parentId === null && item.type === 'Task' && item.status !== 'Completed'; }
 export function filterItems(items, filters = {}) {
-  return items.filter(item => (!Object.hasOwn(filters, 'parentId') || item.parentId === filters.parentId)
+  return items.filter(item => (!filters.scope || filters.scope !== 'inbox' || inInbox(item)) && (!Object.hasOwn(filters, 'parentId') || item.parentId === filters.parentId)
     && (!filters.type || item.type === filters.type) && (!filters.status || item.status === filters.status)
     && (!filters.incomplete || item.status !== 'Completed')
     && (!filters.context || item.context.toLowerCase().includes(filters.context.toLowerCase()))
@@ -43,7 +44,7 @@ export function filterItems(items, filters = {}) {
 }
 const str = (maxLength = 200) => ({ type: 'string', maxLength });
 const idSchema = { type: 'string', minLength: 1, maxLength: 200 };
-const parentSchema = { type: ['string', 'null'], maxLength: 200, description: 'The actual ID of an existing container or parent from tool results. Null means Inbox. A shopping entry uses its Shopping List ID.' };
+const parentSchema = { type: ['string', 'null'], maxLength: 200, description: 'The actual ID of an existing container or parent from tool results. Null means no parent (a root record); actionable Inbox is scoped to unfinished Tasks. A shopping entry uses its Shopping List ID.' };
 const fields = { title: { ...str(), minLength: 1 }, type: { type: 'string', enum: TYPES, description: 'Task means a thing to do or buy, such as Bananas. Shopping List means the container itself, such as Groceries, never the item to buy. New items default to Task; omit on updates unless changing type.' }, description: str(10000), status: { type: 'string', enum: STATUSES, description: 'Completed marks an existing task done; Open means still to do.' }, context: { ...str(), description: 'Optional text such as @Home. Omit when unspecified; do not use null.' }, parentId: parentSchema };
 const schema = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const filters = { search: str(), status: fields.status, context: str() };
@@ -57,7 +58,7 @@ export const TOOLS = [
   ['weekly_review', 'Start or resume the eleven-step weekly review, complete or skip the current step only when the user asks, go back, or pause. Start resumes an unfinished review and never resets a completed one. Completing a step selects the next useful list and returns its question.', schema({ action: { type: 'string', enum: REVIEW_ACTIONS } }, ['action']), false],
   ['add_shopping_item', 'Add a thing to buy to a Shopping List as a child Task. Reuse an existing list, or create a Shopping List container if absent. If more than one list is possible, ask which list. Do not create a Shopping List named after the purchase. An existing completed purchase is reopened; an existing open purchase is not duplicated.', schema({ title: { ...str(), minLength: 1 }, listTitle: { ...str(), minLength: 1 } }, ['title']), false],
   ['complete_task', 'Mark an existing Task completed by its title. Resolve exact title first. Ambiguous or missing tasks return a clarification question without changing anything. Changes only status; never creates or deletes a task.', schema({ title: { ...str(), minLength: 1 } }, ['title']), false],
-  ['list_items', 'Find existing items and their IDs by type or title search. Search Shopping List containers before adding purchases; search Tasks before marking them completed. parentId selects children of a list. Omitted parentId searches all items; null means Inbox.', schema({ parentId: parentSchema, type: fields.type, ...filters, limit: { type: 'integer', minimum: 1, maximum: 100 } }), true],
+  ['list_items', 'Find existing items and their IDs by type or title search. Search Shopping List containers before adding purchases; search Tasks before marking them completed. parentId selects children of a list. Omitted parentId searches all items; null filters root records of any type/status. scope inbox selects only unfinished parentless Tasks. Filters combine conjunctively.', schema({ scope: { type: 'string', enum: ['inbox'] }, parentId: parentSchema, type: fields.type, ...filters, limit: { type: 'integer', minimum: 1, maximum: 100 } }), true],
   ['read_item', 'Read one item and its immediate child IDs.', schema({ id: idSchema }, ['id']), true],
   ['create_item', 'Create a Task for a thing to do or buy. A purchase such as Bananas is type Task, with parentId set to the actual Shopping List ID. To create the container itself, use type Shopping List and a container title such as Shopping List or Groceries. Find or create that container before adding its Task. Defaults: Task, Open, Inbox.', schema(fields, ['title']), false],
   ['update_item', 'Update editable attributes of an existing item.', schema({ id: idSchema, patch: { ...schema(fields), minProperties: 1 } }, ['id', 'patch']), false],
@@ -187,11 +188,13 @@ export function planWorkflow(name, args, items) {
   const message = outcome === 'created' ? `Added “${title}” to “${targetTitle}”.` : outcome === 'reopened' ? `Reopened “${child.title}” in “${targetTitle}”.` : `“${child.title}” is already listed in “${targetTitle}”.`;
   return finish({ outcome, message, ...(child ? { item: child } : {}), ...(list ? { list } : {}) }, { action: outcome === 'created' ? 'Add a shopping Task' : outcome === 'reopened' ? 'Reopen an existing shopping Task' : 'No change; purchase is already listed', shoppingList: { ...(list ? { id: list.id } : {}), title: targetTitle, create: !list }, purchase: { ...(child ? { id: child.id } : {}), title: child?.title || title, type: 'Task' }, changes: mutations.map(change => change.kind === 'create' ? `Create ${change.patch.type}: ${change.patch.title}` : `Change status from ${child.status} to Open only`) });
 }
-// Chrome 154's model decoder rejects these keywords. Full validation still uses TOOLS.
-export function decoderSchema(value) {
-  if (Array.isArray(value)) return value.map(decoderSchema);
+// Named compatibility projection; public validation always retains the full schema.
+export const DECODER_PROFILES = ['chromium-compatibility', 'descriptions'];
+export function decoderSchema(value, profile = 'chromium-compatibility') {
+  if (!DECODER_PROFILES.includes(profile)) fail('Unknown decoder profile.');
+  if (Array.isArray(value)) return value.map(item => decoderSchema(item, profile));
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !['oneOf', 'not', 'minProperties', 'description'].includes(key)).map(([key, item]) => [key, key === 'properties' ? Object.fromEntries(Object.entries(item).map(([name, definition]) => [name, decoderSchema(definition)])) : decoderSchema(item)]));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !['oneOf', 'not', 'minProperties', ...(profile === 'chromium-compatibility' ? ['description'] : [])].includes(key)).map(([key, item]) => [key, key === 'properties' ? Object.fromEntries(Object.entries(item).map(([name, definition]) => [name, decoderSchema(definition, profile)])) : decoderSchema(item, profile)]));
 }
 export const RESPONSE_SCHEMA = schema({ message: { type: 'string', maxLength: 8000 }, tool: { anyOf: [{ type: 'null' }, ...TOOLS.map(tool => schema({ name: { type: 'string', enum: [tool.name] }, arguments: decoderSchema(tool.inputSchema) }, ['name', 'arguments']))] } }, ['message', 'tool']);
 export function parseEnvelope(text) {

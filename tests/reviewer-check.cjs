@@ -3,13 +3,14 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 const URL = process.env.APP_URL || 'http://127.0.0.1:8765';
 let browser;
 async function items(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); const result = await read(db, 'items'); db.close(); return result; }); }
 async function external(page, name, args) { await page.evaluate(({name,args}) => { window.reviewResult = document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(tool => tool.name === name), args)).then(JSON.parse); }, {name,args}); }
 async function result(page) { return page.evaluate(() => window.reviewResult); }
 async function mutate(page, action) { return page.evaluate(async action => { const {openDatabase,mutate}=await import('./storage.js'); const db=await openDatabase(()=>{}); try {return await mutate(db,action);} finally {db.close();} },action); }
-async function ready(page) { await page.getByRole('button',{name:'Continue',exact:true}).click(); await page.locator('#workspace').waitFor({state:'visible'}); }
+async function ready(page) { await page.getByRole('button',{name:'Continue',exact:true}).click(); await page.locator('#workspace').waitFor({state:'visible'}); await configureHarness(page); }
 (async () => {
   browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL || 'chrome',headless:true});
   const nativeCtx=await browser.newContext({serviceWorkers:'block'});const nativePage=await nativeCtx.newPage();await nativePage.goto(URL);

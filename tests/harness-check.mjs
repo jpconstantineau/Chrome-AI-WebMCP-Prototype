@@ -15,7 +15,7 @@ assert.equal(Object.hasOwn(viewSchema, 'oneOf'), false); assert.ok(TOOLS.find(to
 assert.throws(() => validateTool('show_view', { view: 'all', itemId: 'x' }));
 assert.throws(() => validateTool('update_item', { id: 'x', patch: {} }));
 const history = [{ role: 'user', text: 'Keep this question' }, { role: 'assistant', text: 'Keep this answer' }, { role: 'user', text: 'An unsuccessful request' }, { role: 'assistant', text: 'An incorrect proposal' }, { role: 'assistant', text: 'Tool stopped: Denied' }, { role: 'assistant', text: 'A misleading explanation' }, { role: 'user', text: 'Current request' }];
-assert.deepEqual(conversationForModel(history).map(message => message.text), ['Keep this question', 'Keep this answer', 'Current request']); assert.equal(history.length, 7);
+assert.deepEqual(conversationForModel(history).map(message => message.text), ['Keep this question', 'Keep this answer']); assert.equal(history.length, 7);
 globalThis.LanguageModelToolSuccess = class { constructor(value) { Object.assign(this, value); } };
 globalThis.LanguageModelToolError = class { constructor(value) { Object.assign(this, value); } };
 for (const idKey of ['callID', 'callId']) {
@@ -33,6 +33,12 @@ assert.throws(() => parseNativeTurn([{ type: 'tool-call', value: { callID: '1', 
 assert.equal(parseNativeTurn([{ type: 'tool-call', value: { callID: '', name: 'list_attributes', arguments: {} } }]).calls[0].id, '');
 assert.throws(() => parseNativeTurn([{ type: 'tool-call', value: { callID: 'same', name: 'create_item', arguments: { title: 'A' } } }, { type: 'tool-call', value: { callID: 'same', name: 'create_item', arguments: { title: 'B' } } }]));
 assert.equal(callSignature({ name: 'update_item', arguments: { id: 'x', patch: { title: 'A', status: 'Open' } } }), callSignature({ name: 'update_item', arguments: { patch: { status: 'Open', title: 'A' }, id: 'x' } }));
+const captureArgs = Object.freeze({ titles: Object.freeze(['Prep review']), context: '' });
+assert.equal(callSignature({ name: 'capture_tasks', arguments: captureArgs }), callSignature({ name: 'capture_tasks', arguments: { titles: ['Prep review'] } }));
+assert.equal(captureArgs.context, '', 'Signature normalization must not change approved arguments');
+for (const context of ['@Home', '@Work', ' ']) assert.notEqual(callSignature({ name: 'capture_tasks', arguments: { titles: ['Prep review'], context } }), callSignature({ name: 'capture_tasks', arguments: { titles: ['Prep review'] } }));
+assert.notEqual(callSignature({ name: 'capture_tasks', arguments: { titles: ['Prep review'], context: '@Home' } }), callSignature({ name: 'capture_tasks', arguments: { titles: ['Prep review'], context: '@Work' } }));
+assert.notEqual(callSignature({ name: 'update_item', arguments: { id: 'x', patch: { context: '' } } }), callSignature({ name: 'update_item', arguments: { id: 'x', patch: {} } }));
 const full = { ok: true, data: { id: 'x', description: 'x'.repeat(10000), status: 'Completed', parentId: null } };
 const bounded = modelResult(full);
 assert.ok(JSON.stringify(bounded).length < 8000); assert.equal(bounded.data.status, 'Completed'); assert.equal(bounded.data.parentId, null); assert.equal(bounded.modelContextTruncated, true); assert.equal(full.data.description.length, 10000);

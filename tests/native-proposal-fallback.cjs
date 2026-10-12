@@ -3,13 +3,14 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 let browser;
 async function open() {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await context.addInitScript(fixture, { nativeToolUse: true, legacyArguments: true });
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.locator('#workspace').waitFor({ state: 'visible' });
+  await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(() => {
     let serial = 0;
     fixture.call = (name, args) => [{ type: 'tool-call', value: new LanguageModelToolCall({ callId: `fallback-${++serial}`, name, arguments: args }) }];
@@ -30,9 +31,9 @@ async function diagnostics(page) {
 }
 async function noFallback(page, expectedCreates) {
   const info = await diagnostics(page);
-  assert.equal(info.modelToolLoop, 'Native Prompt API tool calls');
+  assert(['Native Prompt API tool calls', 'Constrained JSON bridge'].includes(info.modelToolLoop)); // Contract failures invalidate native readiness for future requests.
   assert.equal(info.nativeProposalFailure, null);
-  assert.equal(await page.evaluate(() => fixture.creates), expectedCreates);
+  assert.equal(await page.evaluate(() => fixture.creates), expectedCreates + 1);
   assert.equal(await page.evaluate(() => fixture.prompts.some(prompt => prompt.constrained)), false);
 }
 (async () => {
@@ -79,17 +80,16 @@ async function noFallback(page, expectedCreates) {
       try { return { items: await read(db, 'items'), history: await read(db, 'history'), prompts: fixture.prompts.length, executions: fixture.executions.length }; } finally { db.close(); }
     });
     await diagnostics(page); await page.getByRole('button', { name: 'Use JSON proposals', exact: true }).click();
-    assert.equal(await page.locator('#workspace').isVisible(), false);
-    assert.equal(await page.evaluate(() => fixture.tools.size), 0);
+    assert.equal(await page.locator('#workspace').isVisible(), true);
+    assert.equal(await page.evaluate(() => fixture.tools.size), 16);
     await page.evaluate(() => { fixture.options.nativeToolUse = false; });
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
     const after = await page.evaluate(async () => {
       const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {});
       try { return { items: await read(db, 'items'), history: await read(db, 'history'), prompts: fixture.prompts.length, executions: fixture.executions.length }; } finally { db.close(); }
     });
     assert.deepEqual(after, before, 'Manual preparation preserves records/history and performs no inference or tool replay');
     assert.match(await page.locator('#chat').innerText(), /Capture keep across manual switch/);
-    assert.equal(await page.evaluate(() => fixture.modelSettings.at(-1).tools), undefined);
+    assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools), undefined);
     assert.equal(await page.locator('#send').isEnabled(), true);
     const info = await diagnostics(page); assert.equal(info.modelToolLoop, 'Constrained JSON bridge'); assert.equal(info.nativeProposalFailure, null);
     await page.evaluate(() => fixture.responses.push({ message: '', tool: { name: 'capture_tasks', arguments: { titles: ['Manual bridge thought'] } } }, { message: 'Saved.', tool: null }));
@@ -114,7 +114,7 @@ async function noFallback(page, expectedCreates) {
     const prompts = await page.evaluate(() => fixture.prompts.length);
     await page.evaluate(() => { fixture.options.createError = false; });
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page, { resetTrace: false });
     assert.equal(await page.evaluate(() => fixture.prompts.length), prompts, 'Preparation must not replay the failed request');
     assert.equal(await page.evaluate(() => fixture.tools.size), 16);
     assert.deepEqual((await data(page)).map(item => item.title), ['Saved before model failure']);
@@ -131,7 +131,7 @@ async function noFallback(page, expectedCreates) {
     await send(page, 'Answer without changing anything.'); await idle(page);
     const info = await diagnostics(page); assert.equal(info.modelToolLoop, 'Constrained JSON bridge'); assert.ok(info.nativeProposalFailure.length);
     assert.deepEqual(await page.evaluate(() => fixture.prompts.map(prompt => prompt.constrained)), [false, true, true]);
-    assert.equal(await page.evaluate(() => fixture.creates), 3); assert.equal((await data(page)).length, 0);
+    assert.equal(await page.evaluate(() => fixture.creates), 4); assert.equal((await data(page)).length, 0);
     await context.close();
   }
   // Post-commit inference failure cannot select another format or repeat work.

@@ -3,12 +3,13 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 let browser;
 async function open(native) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await context.addInitScript(fixture, { nativeToolUse: native, legacyArguments: true });
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(() => {
     let serial = 0;
     fixture.call = (name, args) => ({ type: 'tool-call', value: new LanguageModelToolCall({ callId: `boundary-${++serial}`, name, arguments: args }) });

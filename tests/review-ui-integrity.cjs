@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const fixture = require('./browser-fixture.cjs');
+const configureHarness = require('./harness-ui.cjs');
 const URL = process.env.APP_URL || 'http://127.0.0.1:8765';
 let browser;
 async function savedReview(page) {
@@ -12,7 +13,7 @@ async function savedReview(page) {
 }
 async function ready(page) {
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.locator('#workspace').waitFor({ state: 'visible' });
+  await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
 }
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function guidanceHasNoProgressTool(page, native) {
