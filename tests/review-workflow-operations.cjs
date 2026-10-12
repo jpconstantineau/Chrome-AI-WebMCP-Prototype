@@ -1,0 +1,112 @@
+const assert = require('node:assert/strict');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
+let browser;
+(async () => {
+  browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
+  const context = await browser.newContext({ serviceWorkers: 'block' }), page = await context.newPage();
+  await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
+  const count = await page.evaluate(async () => {
+    const { planWorkflow, validateTool, WORKFLOW_TOOLS, REVIEW_STEPS, planReview } = await import('./workspace.js');
+    const { openDatabase, read, put, mutate, transitionReview } = await import('./storage.js');
+    const db = await openDatabase(() => {}); let checks = 0;
+    const check = (condition, message) => { if (!condition) throw new Error(message); checks++; };
+    const all = () => read(db, 'items'), current = () => read(db, 'reviews', 'weekly');
+    const create = patch => mutate(db, { kind: 'create', patch });
+    async function operation(name, args, plan, signal) { plan ||= planWorkflow(name, args, await all()); return mutate(db, { kind: 'workflow', name, args, snapshot: plan.snapshot }, signal); }
+    async function reviewAction(action, snapshot, signal) { return transitionReview(db, action, snapshot === undefined ? JSON.stringify(await current() || null) : snapshot, signal); }
+    async function reject(fn, code) { try { await fn(); throw new Error('Expected a rejection.'); } catch (error) { if (error.code !== code) throw error; } }
+    try {
+      check(WORKFLOW_TOOLS.length === 5, 'Five exported item workflow names');
+      for (const bad of [{ titles: [] }, { titles: 'task' }, { titles: Array(21).fill('task') }, { titles: ['task', null] }, { titles: ['task'], context: null }, { titles: ['task'], approved: true }]) { let failed = false; try { validateTool('capture_tasks', bad); } catch { failed = true; } check(failed, 'Strict array/string/unknown-field capture validation'); }
+      await reject(() => operation('capture_tasks', { titles: ['task', '   '] }), 'invalid');
+      let result = await operation('capture_tasks', { titles: ['Book dentist', 'Plan studio', 'BOOK   DENTIST'], context: '@Home' });
+      check(result.outcome === 'captured' && result.changedItems.length === 2 && result.items.length === 2 && result.items.every(item => item.parentId === null && item.type === 'Task' && item.context === '@Home'), 'Bulk capture deduplicates normalized titles and returns actual Inbox records');
+      const initial = result.items, dentist = initial.find(item => item.title.toLowerCase().includes('dentist')), studio = initial.find(item => item.title === 'Plan studio');
+      result = await operation('capture_tasks', { titles: ['Book dentist', 'Plan studio'], context: '@Work' });
+      check(result.outcome === 'already_captured' && !result.changedItems.length && result.items.every(item => item.context === '@Home') && (await all()).length === 2, 'Repeated capture is idempotent and preserves existing attributes');
+      let completedCapture = await mutate(db, { kind: 'update', id: dentist.id, patch: { status: 'Completed', description: 'Keep the detailed dental outcome.' } });
+      const recapturePlan = planWorkflow('capture_tasks', { titles: ['Book dentist'], context: '@Work' }, await all());
+      check(recapturePlan.mutations.length === 1 && Object.keys(recapturePlan.mutations[0].patch).join() === 'status' && recapturePlan.effect.reopenTasks[0].toStatus === 'Open', 'Recapture approval explicitly resolves a status-only reopening');
+      completedCapture = await mutate(db, { kind: 'update', id: dentist.id, patch: { context: '@Personal' } });
+      await reject(() => operation('capture_tasks', { titles: ['Book dentist'], context: '@Work' }, recapturePlan), 'stale');
+      check((await all()).find(item => item.id === dentist.id).status === 'Completed', 'Changed completed task after recapture approval rejects without reopening');
+      result = await operation('capture_tasks', { titles: ['Book dentist'], context: '@Work' });
+      const reopenedCapture = result.items[0];
+      check(result.outcome === 'reopened' && result.changedItems.length === 1 && result.reopenedTitles.includes(completedCapture.title) && /Reopened 1/.test(result.message) && reopenedCapture.status === 'Open' && reopenedCapture.id === dentist.id && reopenedCapture.description === completedCapture.description && reopenedCapture.context === completedCapture.context && reopenedCapture.parentId === null && reopenedCapture.createdAt === completedCapture.createdAt && (await all()).length === 2, 'Completed Inbox commitment reopens visibly with an explicit receipt and all other attributes preserved');
+      result = await operation('capture_tasks', { titles: ['Book dentist'], context: '@Work' });
+      check(result.outcome === 'already_captured' && !result.changedItems.length && result.items[0].updatedAt === reopenedCapture.updatedAt, 'Second recapture is unchanged and does not duplicate or rewrite the reopened Task');
+      await mutate(db, { kind: 'update', id: dentist.id, patch: { status: 'In Progress' } });
+      result = await operation('capture_tasks', { titles: ['Book dentist'] });
+      check(result.outcome === 'already_captured' && !result.changedItems.length && result.items[0].status === 'In Progress', 'Recapture preserves non-completed statuses');
+      await create({ title: 'Plan studio' });
+      const beforeAmbiguousCapture = (await all()).length;
+      result = await operation('capture_tasks', { titles: ['Must not be partially captured', 'Plan studio'] });
+      check(result.outcome === 'clarification' && !result.changedItems.length && (await all()).length === beforeAmbiguousCapture && !(await all()).some(item => item.title === 'Must not be partially captured'), 'Later ambiguous Inbox title cancels every earlier planned capture');
+      const shopping = await create({ title: 'Groceries', type: 'Shopping List' });
+      const shoppingChild = await create({ title: 'Shopping thought', parentId: shopping.id });
+      result = await operation('capture_tasks', { titles: ['Shopping thought'] });
+      check(result.items[0].id !== shoppingChild.id && result.items[0].parentId === null, 'Capture deduplicates Inbox only and leaves organized task intact');
+      const taskA = await create({ title: 'Draft workshop', description: 'Preserve outcome', context: '@Work', status: 'Waiting For' });
+      const taskB = await create({ title: 'Find supplies', description: 'Keep materials', context: '@Home', status: 'Blocked' });
+      const child = await create({ title: 'Workshop sub-action', parentId: taskA.id });
+      result = await operation('organize_tasks', { titles: [taskA.title, taskB.title], newProjectTitle: 'Workshop project' });
+      check(result.outcome === 'organized' && result.list.type === 'Project' && result.changedItems.length === 3 && result.items.length === 2 && result.items.every(item => item.parentId === result.list.id), 'New Project and all Task moves commit atomically with actual destination ID');
+      const project = result.list;
+      check(result.items.find(item => item.id === taskA.id).description === taskA.description && result.items.find(item => item.id === taskA.id).status === 'Waiting For' && (await all()).find(item => item.id === child.id).parentId === taskA.id, 'Organization changes only parent and preserves descendants and attributes');
+      result = await operation('organize_tasks', { titles: [taskA.title, taskB.title], newProjectTitle: ' workshop PROJECT ' });
+      check(result.outcome === 'already_organized' && !result.changedItems.length && result.list.id === project.id, 'Repeated new-project organization reuses the exact unique Project');
+      result = await operation('organize_tasks', { titles: [taskA.title, taskB.title], parentId: shopping.id });
+      check(result.items.every(item => item.parentId === shopping.id) && result.items.every(item => item.id === taskA.id || item.id === taskB.id), 'Bulk moves between existing lists retain IDs');
+      result = await operation('organize_tasks', { titles: [taskB.title], parentId: null });
+      check(result.items[0].parentId === null && result.items[0].status === 'Blocked', 'Moving a Task to Inbox preserves its status');
+      await reject(() => operation('organize_tasks', { titles: [taskA.title], parentId: child.id }), 'invalid');
+      check((await all()).find(item => item.id === taskA.id).parentId === shopping.id, 'Descendant destination rejects cycle without changing parent');
+      const missingCount = (await all()).length;
+      result = await operation('organize_tasks', { titles: [taskA.title, 'Missing task'], newProjectTitle: 'Must not create project' });
+      check(result.outcome === 'clarification' && !result.changedItems.length && (await all()).length === missingCount, 'Missing batch source never creates Project or performs earlier move');
+      result = await operation('organize_tasks', { titles: ['Plan studio'], parentId: shopping.id });
+      check(result.outcome === 'clarification' && result.candidates.length === 2 && !result.changedItems.length, 'Ambiguous source titles return candidates without a move');
+      for (const bad of [{ titles: [taskA.title] }, { titles: [taskA.title], parentId: null, newProjectTitle: 'Both' }]) await reject(() => operation('organize_tasks', bad), 'invalid');
+      result = await operation('set_task_status', { title: taskA.title, status: 'In Progress' });
+      check(result.outcome === 'status_changed' && result.item.status === 'In Progress' && result.item.description === taskA.description && result.item.parentId === shopping.id && result.item.createdAt === taskA.createdAt, 'In Progress updates status only');
+      const statusVersion = result.item.updatedAt;
+      result = await operation('set_task_status', { title: taskA.title, status: 'In Progress' });
+      check(result.outcome === 'already_set' && !result.changedItems.length && result.item.updatedAt === statusVersion, 'Repeated status change is a no-op');
+      result = await operation('set_task_status', { title: taskA.title, status: 'Completed' });
+      check(result.outcome === 'completed' && result.item.status === 'Completed', 'Completion through status workflow preserves existing behavior');
+      result = await operation('set_task_status', { title: 'Plan studio', status: 'In Progress' });
+      check(result.outcome === 'clarification' && !result.changedItems.length, 'Ambiguous status change never chooses a duplicate');
+      const captured = planWorkflow('capture_tasks', { titles: ['New after approval'] }, await all()); await create({ title: 'New after approval' });
+      await reject(() => operation('capture_tasks', { titles: ['New after approval'] }, captured), 'stale');
+      const movePlan = planWorkflow('organize_tasks', { titles: [taskB.title], parentId: shopping.id }, await all()); await mutate(db, { kind: 'update', id: shopping.id, patch: { title: 'Groceries renamed' } });
+      await reject(() => operation('organize_tasks', { titles: [taskB.title], parentId: shopping.id }, movePlan), 'stale');
+      const statusPlan = planWorkflow('set_task_status', { title: taskB.title, status: 'In Progress' }, await all()); await create({ title: taskB.title });
+      await reject(() => operation('set_task_status', { title: taskB.title, status: 'In Progress' }, statusPlan), 'stale');
+      check((await all()).find(item => item.id === taskB.id).status === 'Blocked', 'New duplicate after status approval rejects without effects');
+      const controller = new AbortController(); controller.abort();
+      await reject(() => operation('capture_tasks', { titles: ['Never captured'] }, null, controller.signal), 'cancelled');
+      check(!(await all()).some(item => item.title === 'Never captured'), 'Aborted batch caller never creates a Task');
+      const originalPut = IDBObjectStore.prototype.put, beforeRollback = await all(); let writes = 0;
+      IDBObjectStore.prototype.put = function(...args) { if (this.name === 'items' && ++writes === 2) throw new Error('Injected batch second write failure'); return originalPut.apply(this, args); };
+      let rollback = false; try { await operation('organize_tasks', { titles: [taskA.title], newProjectTitle: 'Rollback project' }); } catch (error) { rollback = error.message === 'Injected batch second write failure'; } finally { IDBObjectStore.prototype.put = originalPut; }
+      check(rollback && JSON.stringify(await all()) === JSON.stringify(beforeRollback), 'Composite Project/move failure rolls back every record');
+      let pure = planReview(null, 'start'); check(pure.review.index === 0 && pure.review.active && pure.result.nextStep.question, 'Pure review start supplies a stable first-step question');
+      for (let index = 0; index < 11; index++) { check(pure.review.index === index && !!REVIEW_STEPS[index].question, 'Every review step has a stable question and ordered index'); pure = planReview(pure.review, index === 5 ? 'skip_step' : 'complete_step'); }
+      check(pure.review.index === 11 && !pure.review.active && pure.review.completed.length === 10 && pure.review.skipped.length === 1 && !pure.result.nextStep, 'All eleven pure steps finish with completion and skipped counts');
+      const finished = JSON.stringify(pure.review); check(JSON.stringify(planReview(pure.review, 'start').review) === finished, 'Starting a finished review never resets progress');
+      let stored = await reviewAction('start'); check(stored.review.active && stored.nextStep.question, 'Atomic review start stores active progress');
+      const startSnapshot = JSON.stringify(stored.review); stored = await reviewAction('pause'); const pausedSnapshot = JSON.stringify(stored.review);
+      const pausedResult = await reviewAction('complete_step'); check(pausedResult.outcome === 'review_clarification' && pausedResult.review.index === 0 && JSON.stringify(await current()) === pausedSnapshot, 'Paused step completion clarifies without advancing or writing');
+      await reject(() => reviewAction('complete_step', startSnapshot), 'stale');
+      stored = await reviewAction('resume'); stored = await reviewAction('complete_step'); stored = await reviewAction('back');
+      check(stored.review.index === 0 && stored.review.completed.includes(REVIEW_STEPS[0].id), 'Back selects previous step without changing marks');
+      const reviewBeforeCancel = JSON.stringify(await current()); await reject(() => reviewAction('pause', reviewBeforeCancel, controller.signal), 'cancelled'); check(JSON.stringify(await current()) === reviewBeforeCancel, 'Cancelled review caller keeps saved progress');
+      stored = await reviewAction('complete_step'); for (let index = 1; index < 11; index++) stored = await reviewAction(index === 9 ? 'skip_step' : 'complete_step');
+      check(stored.outcome === 'review_finished' && stored.review.index === 11 && !stored.review.active && !!stored.review.completedAt && !Number.isNaN(Date.parse(stored.review.completedAt)), 'Final atomic review step stamps completion time and deactivates review');
+      const savedFinal = JSON.stringify(await current()); stored = await reviewAction('start'); check(stored.outcome === 'review_finished' && JSON.stringify(await current()) === savedFinal, 'Completed atomic review start is an unchanged no-op');
+      return checks;
+    } finally { db.close(); }
+  });
+  assert(count >= 40); console.log(`Review workflow checks passed: ${count} production schema, real IndexedDB batch/status/stale/rollback, and all-eleven-step review assertions.`);
+  await browser.close();
+})().catch(async error => { console.error(error); await browser?.close(); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-import { validateItem, descendants, fail, planWorkflow } from './workspace.js';
+import { validateItem, descendants, fail, planWorkflow, planReview } from './workspace.js';
 export const DB_NAME = 'chrome-ai-webmcp-prototype';
 export function openDatabase(onClose) {
   return new Promise((resolve, reject) => {
@@ -35,6 +35,38 @@ export function put(db, name, value, clear = false) {
   });
 }
 export function snapshot(items) { return items.map(item => [item.id, item.updatedAt]).sort(([a], [b]) => a.localeCompare(b)); }
+function reviewTransaction(db, expectedSnapshot, signal, update) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(Object.assign(new Error('Review action cancelled.'), { code: 'cancelled' })); return; }
+    const tx = db.transaction('reviews', 'readwrite'), store = tx.objectStore('reviews');
+    let result, error;
+    const abort = () => { try { tx.abort(); } catch { /* Already committed. */ } };
+    signal?.addEventListener('abort', abort, { once: true });
+    const request = store.get('weekly');
+    request.onsuccess = () => {
+      try {
+        if (signal?.aborted) fail('Review action cancelled.', 'cancelled');
+        const existing = request.result || null;
+        if (JSON.stringify(existing) !== expectedSnapshot) fail('Review progress changed. Review and approve the action again.', 'stale');
+        const plan = update(existing), next = plan.review;
+        if (next && next.index === 11 && !next.completedAt) next.completedAt = new Date().toISOString();
+        if (next && JSON.stringify(next) !== JSON.stringify(existing)) store.put(next);
+        result = { ...plan.result, review: next };
+      } catch (caught) { error = caught; try { tx.abort(); } catch { /* A caller may have already aborted. */ } }
+    };
+    tx.oncomplete = () => { signal?.removeEventListener('abort', abort); resolve(result); };
+    tx.onabort = tx.onerror = () => { signal?.removeEventListener('abort', abort); reject(error || Object.assign(new Error(signal?.aborted ? 'Review action cancelled.' : 'Review storage transaction failed.'), { code: signal?.aborted ? 'cancelled' : 'storage' })); };
+  });
+}
+export function transitionReview(db, action, expectedSnapshot, signal) {
+  return reviewTransaction(db, expectedSnapshot, signal, existing => planReview(existing, action));
+}
+export function writeReview(db, value, expectedSnapshot, signal) {
+  return reviewTransaction(db, expectedSnapshot, signal, () => {
+    planReview(value, value?.active ? 'resume' : 'pause');
+    return { review: value, result: {} };
+  }).then(result => result.review);
+}
 export function mutate(db, action, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(Object.assign(new Error('Action cancelled.'), { code: 'cancelled' })); return; }
@@ -70,6 +102,7 @@ export function mutate(db, action, signal) {
           const itemId = refs.get('item')?.id || plan.result.item?.id, listId = refs.get('list')?.id || plan.result.list?.id;
           if (itemId) result.item = working.find(item => item.id === itemId);
           if (listId) result.list = working.find(item => item.id === listId);
+          if (plan.itemRefs.length && plan.result.outcome !== 'clarification') result.items = plan.itemRefs.map(reference => working.find(item => item.id === (reference.id || refs.get(reference.ref)?.id)));
         } else if (action.kind === 'delete') {
           const subtree = descendants(items, action.id);
           if (JSON.stringify(snapshot(subtree)) !== JSON.stringify(action.snapshot)) fail('The deletion targets changed. Review and confirm again.', 'stale');

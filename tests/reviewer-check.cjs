@@ -21,7 +21,7 @@ async function ready(page) { await page.getByRole('button',{name:'Continue',exac
   const blockedCtx=await browser.newContext({serviceWorkers:'block'});await blockedCtx.addInitScript(fixture);const blocked=await blockedCtx.newPage();await blocked.goto(URL);
   await blocked.evaluate(()=>new Promise(resolve=>{const r=indexedDB.open('chrome-ai-webmcp-prototype',1);r.onupgradeneeded=()=>{r.result.createObjectStore('preferences',{keyPath:'id'});r.result.createObjectStore('history',{keyPath:'id',autoIncrement:true});};r.onsuccess=()=>{window.heldDatabase=r.result;resolve();};}));
   await blocked.getByRole('button',{name:'Continue',exact:true}).click();await blocked.getByText('Persistent storage failed',{exact:true}).waitFor();assert.match(await blocked.locator('#startup-body').innerText(),/Close other tabs/);
-  await blocked.evaluate(()=>heldDatabase.close());await blocked.getByRole('button',{name:'Retry',exact:true}).click();await ready(blocked);assert.equal(await blocked.evaluate(()=>fixture.tools.size),12);await blockedCtx.close();
+  await blocked.evaluate(()=>heldDatabase.close());await blocked.getByRole('button',{name:'Retry',exact:true}).click();await ready(blocked);assert.equal(await blocked.evaluate(()=>fixture.tools.size),16);await blockedCtx.close();
   const ctx=await browser.newContext({viewport:{width:1440,height:960},serviceWorkers:'block'});
   await ctx.addInitScript(fixture);
   const page=await ctx.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -68,7 +68,7 @@ async function ready(page) { await page.getByRole('button',{name:'Continue',exac
   await page.getByRole('button',{name:'Tools',exact:true}).click();await page.locator('#dialog').getByRole('button',{name:'Cancel',exact:true}).press('Enter');assert.equal(await page.locator('#item-description').inputValue(),'Reviewer unsaved description');
   await mutate(page,{kind:'update',id:target.id,patch:{status:'Blocked'}});await page.getByRole('button',{name:'Save item'}).click();await page.getByText('Not saved: Item changed. Reload and review before saving.',{exact:true}).waitFor();assert.equal(await page.locator('#item-description').inputValue(),'Reviewer unsaved description');
   await page.getByRole('button',{name:'Tools',exact:true}).click();await page.locator('#dialog').getByRole('button',{name:'Discard',exact:true}).click();
-  await page.getByText('12 native own-page tools discovered.').waitFor();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.getByText('16 native own-page tools discovered.').waitFor();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.getByRole('button',{name:'Lists',exact:true}).click();await page.locator('#navigation').getByRole('button',{name:'＋ New item'}).click();await page.locator('#item-title').fill('W'.repeat(200));await page.getByRole('button',{name:'Save item'}).click();
   await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Saved'));
   await page.getByRole('heading',{name:'W'.repeat(200),exact:true}).waitFor();

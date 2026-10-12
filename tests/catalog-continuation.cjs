@@ -29,16 +29,15 @@ let browser;
         return JSON.parse(text.match(/^<[^>]+>\n([\s\S]*)\n<\/[^>]+>$/u)[1]);
       };
       fixture.responses.push(
-        () => {
-          const tools = fixture.options.nativeToolUse ? fixture.modelSettings.at(-1).tools : fixture.prompts.at(-1).input.tools;
-          fixture.originalReference = tools.find(tool => tool.name === 'read_item').inputSchema.properties.id.enum[0];
+        Object.assign(() => {
+          fixture.originalReference = fixture.options.nativeToolUse ? fixture.modelSettings.at(-1).tools.find(tool => tool.name === 'read_item').inputSchema.properties.id.enum[0] : fixture.prompts.findLast(prompt => prompt.stage === 'route').input.DATA.visibleItems[0].id;
           return call('create_item', { title: 'Same title', description: 'New duplicate' });
-        },
-        () => { fixture.createdFeedback = feedback(); return call('read_item', { id: fixture.originalReference }); },
-        () => {
+        }, { route: 'create_item' }),
+        Object.assign(() => { fixture.createdFeedback = feedback(); return call('read_item', { id: fixture.originalReference }); }, { route: 'read_item' }),
+        Object.assign(() => {
           fixture.readFeedback = feedback();
           return fixture.options.nativeToolUse ? [{ type: 'text', value: 'Read the original record.' }] : { message: 'Read the original record.', tool: null };
-        }
+        }, { route: 'respond' })
       );
     });
     await page.locator('#message').fill('Create another Same title task, then read the original record.');

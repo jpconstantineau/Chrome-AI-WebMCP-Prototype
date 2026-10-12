@@ -1,7 +1,18 @@
-import { TOOLS, validateTool, decoderSchema, fail } from './workspace.js';
+import { TOOLS, WORKFLOW_TOOLS, validateTool, decoderSchema, fail } from './workspace.js';
 
-export const ASSISTANT_SYSTEM = `You manage local lists and guide a weekly review using the provided tools.
+export const ITEM_MUTATING_TOOLS = [...WORKFLOW_TOOLS, 'create_item', 'update_item', 'update_attribute', 'set_parent', 'delete_item'];
+export const REVIEW_BOUNDARY_MESSAGE = 'Your item changes are saved. Send a separate message when you want to change your weekly review.';
+export function afterItemMutation(catalog) { return { ...catalog, tools: catalog.tools.filter(tool => tool.name !== 'weekly_review'), itemMutationBoundary: true }; }
+
+export const ASSISTANT_SYSTEM = `You manage local lists and guide an eleven-step weekly review using the provided tools.
 Users speak naturally. Never ask them for tool names or technical references.
+When the user asks to capture, save, create, move, start, or complete something, propose the appropriate tool unless clarification is needed. Restating the request does not perform it.
+Use weekly_review to start or resume a weekly review, pause it, or advance when the user explicitly says the CURRENT step is done, skipped, or asks to move on. Never advance just because tasks were created or updated. Follow the current review step in context, one step at a time. Calendar steps ask the user to consult their own calendar; you cannot read it.
+After an item operation succeeds, finish any remaining requested item operations or reads; leave weekly-review controls for a separate user message.
+Use capture_tasks for a mind dump or capturing several tasks in Inbox. Extract each separate commitment as a short title in the declared task-title parameters; do not combine them into one task or drop meaningful words. Preserve explicitly named titles exactly. Context means a supplied place or condition such as @Home or @Work; never copy the task list or conversation into context. Omit context when unspecified.
+For example, "Mind dump: compare car insurance, book a test drive, and renew my passport. Capture these in Inbox" calls capture_tasks with {"titles":["Compare car insurance","Book a test drive","Renew my passport"]}, omitting context.
+Use organize_tasks to move tasks between existing lists or Inbox, or under a new Project. Choose existing task titles from the declared task-title choices, and the destination parent from its readable choices. For a NEW project use newProjectTitle instead of parentId; the tool creates it and moves all selected tasks atomically. Never ask the user for IDs, and never create a Task to represent a Project.
+Use set_task_status for started/working on/in progress/waiting/blocked tasks; select the existing title and the appropriate status. Updating status preserves the parent and other details.
 Prefer add_shopping_item for purchases: "add bananas to shopping list" means title "Bananas", with listTitle selected from the provided choices when specified. It handles the Shopping List container, child Task, duplicates, and reopening. If several lists fit, ask which one.
 Prefer complete_task for "completed research for new car", "finished", or "done with": choose the existing Task title from its enum. Never invent a completed task; ask when ambiguous or absent.
 Follow tool schemas exactly. For item parameters choose the supplied readable enum references; never invent references or IDs. Newly created items become selectable in the next user turn. Shopping Lists are containers; purchases are their child Tasks.
@@ -27,8 +38,44 @@ const unavailableReference = '[unavailable item reference]';
 const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
 const recordSignature = records => JSON.stringify(records.map(item => Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]]))).sort((a, b) => a.id.localeCompare(b.id)));
 
+// This extracts explicitly declared literal names; the model still selects the operation.
+export function explicitCaptureTitles(userText) {
+  if (typeof userText !== 'string') return null;
+  const markers = [...userText.matchAll(/\b(?:exact titles?\s*:|tasks? (?:named|called|titled)\s*:?)\s*/giu)];
+  if (markers.length !== 1) return null;
+  let cursor = markers[0].index + markers[0][0].length;
+  const titles = [];
+  function quoted() {
+    const start = cursor, opening = userText[cursor];
+    if (opening === '“') {
+      const end = userText.indexOf('”', cursor + 1); if (end < 0 || userText.slice(cursor + 1, end).includes('“')) return null;
+      cursor = end + 1; return userText.slice(start + 1, end);
+    }
+    if (opening !== '"') return null;
+    cursor++;
+    while (cursor < userText.length) {
+      if (userText[cursor] === '\\') { cursor += 2; continue; }
+      if (userText[cursor++] === '"') { try { return JSON.parse(userText.slice(start, cursor)); } catch { return null; } }
+    }
+    return null;
+  }
+  while (true) {
+    const value = quoted();
+    if (typeof value !== 'string' || !value.trim() || value.length > 200 || titles.length >= 20) return null;
+    titles.push(value.trim());
+    const rest = userText.slice(cursor), separator = rest.match(/^\s*(?:,\s*(?:and\b\s*)?|and\b\s*)/iu);
+    if (!separator) { if (/^\s*["“”]/u.test(rest)) return null; break; }
+    cursor += separator[0].length;
+    if (![ '"', '“' ].includes(userText[cursor])) {
+      if (/^[,”]/u.test(userText.slice(cursor))) return null;
+      break;
+    }
+  }
+  return [...new Set(titles)];
+}
+
 // References are fixed for a user turn; new data cannot silently retarget an old choice.
-export function modelCatalog(tools, items) {
+export function modelCatalog(tools, items, options = {}) {
   const snapshot = items.map(item => ({ ...item }));
   const idToReference = new Map(), referenceToItem = new Map();
   const scrubUUID = text => text.replace(uuidPattern, unavailableReference);
@@ -70,11 +117,40 @@ export function modelCatalog(tools, items) {
       ? Object.fromEntries(Object.entries(value).map(([name, property]) => [name, ['id', 'parentId', 'itemId'].includes(name) ? referenceSchema(name === 'parentId') : projectSchema(property)]))
       : projectSchema(value)]));
   }
-  const catalogTools = tools.map(tool => ({ ...tool, inputSchema: typeof tool.inputSchema === 'string' ? JSON.parse(tool.inputSchema) : tool.inputSchema })).filter(tool => !(tool.name === 'complete_task' && !tasks.length) && !(tool.inputSchema.required?.some(name => ['id', 'itemId'].includes(name)) && !references.length)).map(tool => {
+  const captureTitleChoices = new Map();
+  if (options.captureTitles?.length) {
+    const canonicalTitles = new Map();
+    if (options.captureTitles.length > 20) fail('At most twenty literal task titles can be captured.');
+    for (const title of options.captureTitles) {
+      if (typeof title !== 'string' || !title.trim() || title.length > 200) fail('A literal task title is invalid.');
+      const canonical = title.trim().replace(/\s+/gu, ' ').toLowerCase();
+      if (canonicalTitles.has(canonical) && canonicalTitles.get(canonical) !== title) fail('Literal task names differ only in case or spacing. Please give distinct names.');
+      canonicalTitles.set(canonical, title);
+      const choice = project(title).slice(0, 200);
+      if (captureTitleChoices.has(choice) && captureTitleChoices.get(choice) !== title) fail('Literal task names cannot be distinguished safely. Please give distinct names.');
+      captureTitleChoices.set(choice, title);
+    }
+  }
+  const catalogTools = tools.map(tool => ({ ...tool, inputSchema: typeof tool.inputSchema === 'string' ? JSON.parse(tool.inputSchema) : tool.inputSchema })).filter(tool => !(['complete_task', 'set_task_status', 'organize_tasks'].includes(tool.name) && !tasks.length) && !(tool.name === 'weekly_review' && options.reviewActions?.length === 0) && !(tool.inputSchema.required?.some(name => ['id', 'itemId'].includes(name)) && !references.length)).map(tool => {
     const original = tool.inputSchema;
     const inputSchema = projectSchema(original);
     if (!references.length) delete inputSchema.properties.itemId;
-    if (tool.name === 'complete_task') inputSchema.properties.title.enum = titles(tasks);
+    if (['complete_task', 'set_task_status'].includes(tool.name)) inputSchema.properties.title.enum = titles(tasks);
+    if (tool.name === 'organize_tasks') {
+      inputSchema.properties.titles.items.enum = titles(tasks);
+      // Complete exclusive branches survive the decoder's unsupported oneOf/not
+      // projection: selecting an existing destination cannot emit a new name.
+      inputSchema.anyOf = ['parentId', 'newProjectTitle'].map(destination => ({
+        type: 'object', properties: { titles: inputSchema.properties.titles, [destination]: inputSchema.properties[destination] },
+        required: ['titles', destination], additionalProperties: false
+      }));
+    }
+    if (tool.name === 'capture_tasks' && captureTitleChoices.size) {
+      const choices = [...captureTitleChoices.keys()];
+      inputSchema.properties.titles.items = { ...inputSchema.properties.titles.items, enum: choices };
+      inputSchema.properties.titles.minItems = inputSchema.properties.titles.maxItems = choices.length;
+    }
+    if (tool.name === 'weekly_review' && options.reviewActions) inputSchema.properties.action.enum = options.reviewActions;
     if (tool.name === 'add_shopping_item') inputSchema.properties.listTitle.enum = lists.length ? titles(lists) : ['Shopping List'];
     if (tool.name === 'update_attribute') inputSchema.anyOf = [
       { properties: { attribute: { enum: ['parentId'] }, value: referenceSchema(true) } },
@@ -82,7 +158,9 @@ export function modelCatalog(tools, items) {
     ];
     return { name: tool.name, description: tool.description.replace(/\bIDs?\b/gu, 'readable item references'), inputSchema: decoderSchema(inputSchema) };
   });
-  const responseSchema = { type: 'object', properties: { message: { type: 'string', maxLength: 8000 }, tool: { anyOf: [{ type: 'null' }, ...catalogTools.map(tool => ({ type: 'object', properties: { name: { type: 'string', enum: [tool.name] }, arguments: tool.inputSchema }, required: ['name', 'arguments'], additionalProperties: false }))] } }, required: ['message', 'tool'], additionalProperties: false };
+  // Select the action before composing prose; a free-text-first grammar can
+  // encourage the small local model to paraphrase a request and stop.
+  const responseSchema = { type: 'object', properties: { tool: { anyOf: [...catalogTools.map(tool => ({ type: 'object', properties: { name: { type: 'string', enum: [tool.name] }, arguments: tool.inputSchema }, required: ['name', 'arguments'], additionalProperties: false })), { type: 'null' }] }, message: { type: 'string', maxLength: 600 } }, required: ['tool', 'message'], additionalProperties: false };
   function checkChoices(value, schema) {
     if (schema.type) {
       const types = Array.isArray(schema.type) ? schema.type : [schema.type];
@@ -92,6 +170,10 @@ export function modelCatalog(tools, items) {
     if (schema.enum && !schema.enum.includes(value)) fail('Choose an available readable parameter option.');
     if (typeof value === 'string' && (value.length < (schema.minLength || 0) || value.length > (schema.maxLength ?? Infinity))) fail('A model parameter has an invalid length.');
     if (typeof value === 'number' && (value < (schema.minimum ?? -Infinity) || value > (schema.maximum ?? Infinity))) fail('A model parameter is outside the allowed range.');
+    if (Array.isArray(value)) {
+      if (value.length < (schema.minItems || 0) || value.length > (schema.maxItems ?? Infinity)) fail('A model parameter array has an invalid length.');
+      if (schema.items) value.forEach(entry => checkChoices(entry, schema.items));
+    }
     if (schema.properties && value && typeof value === 'object' && !Array.isArray(value)) {
       for (const name of schema.required || []) if (!Object.hasOwn(value, name)) fail(`Required field: ${name}`);
       for (const [key, entry] of Object.entries(value)) {
@@ -122,9 +204,22 @@ export function modelCatalog(tools, items) {
       return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, ['id', 'parentId', 'itemId'].includes(key) ? resolveReference(entry) : map(entry)]));
     };
     const args = map(call.arguments);
+    if (call.name === 'capture_tasks' && captureTitleChoices.size) {
+      if (args.titles.length !== captureTitleChoices.size || new Set(args.titles).size !== captureTitleChoices.size || args.titles.some(title => !captureTitleChoices.has(title))) fail('Capture every explicitly named task exactly once; do not omit, duplicate or invent a title.');
+      args.titles = args.titles.map(title => captureTitleChoices.get(title));
+    }
     if (call.name === 'update_attribute' && args.attribute === 'parentId') args.value = resolveReference(args.value);
-    if (call.name === 'complete_task' || call.name === 'add_shopping_item') {
-      const type = call.name === 'complete_task' ? 'Task' : 'Shopping List';
+    if (call.name === 'organize_tasks') {
+      args.titles = args.titles.map(title => {
+        const matches = snapshot.filter(item => item.type === 'Task' && titleChoice(item) === title);
+        const actualTitles = [...new Set(matches.map(item => item.title))];
+        if (actualTitles.length !== 1) fail('The readable title needs clarification.');
+        if (recordSignature(matches) !== recordSignature(currentItems.filter(item => item.type === 'Task' && item.title === actualTitles[0]))) fail('The selected task choices changed. Please make a new request.', 'stale');
+        return actualTitles[0];
+      });
+    }
+    if (['complete_task', 'set_task_status', 'add_shopping_item'].includes(call.name)) {
+      const type = call.name === 'add_shopping_item' ? 'Shopping List' : 'Task';
       const key = type === 'Task' ? 'title' : 'listTitle';
       if (args[key] !== undefined) {
         const actualTitles = [...new Set(snapshot.filter(item => item.type === type && titleChoice(item) === args[key]).map(item => item.title))];
@@ -141,6 +236,29 @@ export function modelCatalog(tools, items) {
   return { tools: catalogTools, responseSchema, resolve, project };
 }
 
+export function routeSchema(catalog) { return { type: 'string', enum: ['respond', ...catalog.tools.map(tool => tool.name)] }; }
+export const BRIDGE_REPLY_SCHEMA = { type: 'object', properties: { message: { type: 'string', maxLength: 600 } }, required: ['message'], additionalProperties: false };
+function bridgeJSON(text, limit = 25000) {
+  if (typeof text !== 'string' || text.length > limit) fail('The model returned an invalid bridge response.');
+  try { return JSON.parse(text); } catch { fail('The model did not return valid JSON.'); }
+}
+export function parseRoute(text, catalog) {
+  const operation = bridgeJSON(text, 200);
+  if (operation === 'weekly_review' && catalog.itemMutationBoundary) fail(REVIEW_BOUNDARY_MESSAGE, 'review_boundary');
+  if (!routeSchema(catalog).enum.includes(operation)) fail('The model selected an unavailable operation.');
+  return operation;
+}
+export function parseBridgeArguments(text, name, catalog) {
+  const call = { name, arguments: bridgeJSON(text) };
+  catalog.resolve(call);
+  return call;
+}
+export function parseBridgeReply(text) {
+  const value = bridgeJSON(text, 2000);
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1 || typeof value.message !== 'string' || !value.message.trim() || value.message.length > 600) fail('The model returned an empty or invalid reply.');
+  return value.message;
+}
+
 export function conversationForModel(history) {
   const turns = [];
   for (const entry of history) {
@@ -151,10 +269,10 @@ export function conversationForModel(history) {
     }
   }
   // A rejected proposal and its explanatory reply are also poor examples, not just the diagnostic.
-  return turns.filter(turn => !turn.some(message => message.role === 'assistant' && /^(Tool stopped:|Request failed:)/.test(message.text))).flat().slice(-12).map(message => ({ ...message, text: message.text.slice(0, 2000) }));
+  return turns.filter(turn => !turn.some(message => message.role === 'assistant' && /^(Tool stopped:|Request failed:)/.test(message.text))).flat().slice(-6).map(message => ({ ...message, text: message.text.slice(0, 1000) }));
 }
 
-export function parseNativeTurn(parts) {
+export function parseNativeTurn(parts, validateArguments = validateTool) {
   // Chrome may return ordinary text when inference produces no tool calls.
   if (typeof parts === 'string') parts = [{ type: 'text', value: parts }];
   if (!Array.isArray(parts) || parts.length > 32) fail('The model returned invalid native message content.');
@@ -164,7 +282,7 @@ export function parseNativeTurn(parts) {
     else if (part.type === 'tool-call') {
       const value = part.value;
       if (!value || typeof value.name !== 'string') fail('The model returned an invalid tool call.');
-      validateTool(value.name, value.arguments);
+      validateArguments(value.name, value.arguments);
       // Chrome 154 uses callID; the current proposal spells this callId.
       const idKey = 'callId' in value ? 'callId' : 'callID';
       if (typeof value[idKey] !== 'string') fail('The native tool call has no call identifier.');

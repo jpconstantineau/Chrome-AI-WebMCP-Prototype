@@ -1,5 +1,5 @@
 const PREFIX = 'chrome-ai-webmcp-cache-';
-const CACHE = `${PREFIX}v3`;
+const CACHE = `${PREFIX}v4`;
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './harness.js', './workspace.js', './storage.js', './manifest.webmanifest', './icon.svg', './icon-192.png'];
 const SHELL = new Set(ASSETS.map(path => new URL(path, self.registration.scope).href));
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));

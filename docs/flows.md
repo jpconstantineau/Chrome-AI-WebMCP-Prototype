@@ -32,8 +32,15 @@ sequenceDiagram
   User->>UI: Request a task change
   UI->>MCP: getTools()
   MCP-->>UI: Own-page tool descriptors
-  UI->>Model: Context + schemas + request
-  Model-->>UI: Constrained message and proposed call
+  alt Native typed proposal mode
+    UI->>Model: Context + projected schemas + request
+    Model-->>UI: Typed calls with opaque call identities
+  else Constrained JSON bridge
+    UI->>Model: Tool names/descriptions + bounded context + request
+    Model-->>UI: Selected operation name
+    UI->>Model: Selected argument schema + request
+    Model-->>UI: Constrained argument object
+  end
   UI->>UI: Validate envelope and allowlisted call
   UI->>MCP: executeTool(descriptor, arguments)
   MCP->>Callback: Execute registered callback
@@ -52,6 +59,7 @@ sequenceDiagram
   DB-->>Callback: Transaction complete or error
   Callback-->>MCP: Structured committed result or failure
   MCP-->>UI: Tool result
+  UI->>UI: Retain committed receipt; item writes require a fresh message for review controls
   UI->>Model: Delimited tool result data
   Model-->>UI: Final response or next bounded proposal
   UI-->>User: Message + truthful activity status

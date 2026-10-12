@@ -52,7 +52,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
     assert.equal(research.status, 'Completed'); assert.equal(research.title, 'Research for new car'); assert.equal(research.description, 'Compare total cost and reliability'); assert.equal(research.context, '@Home');
     assert.equal(await page.evaluate(() => fixture.executions.filter(call => call.name === 'complete_task').length), 1);
     if (options.nativeToolUse) {
-      assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools.length), 12);
+      assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools.length), 16);
       assert.equal(await page.evaluate(() => fixture.prompts.some(prompt => prompt.constrained)), false);
       const identities = await page.evaluate(() => fixture.prompts.flatMap(prompt => Array.isArray(prompt.messages) ? prompt.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'tool-response').map(part => part.value[fixture.options.idKey]) : []) : []));
       assert.equal(identities.length, 3); assert.equal(new Set(identities).size, 3);
@@ -60,7 +60,8 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
     // An LLM repeated proposal must never create a second shopping entry.
     await page.evaluate(() => fixture.responses.push(fixture.call('add_shopping_item', { title: 'Apples' }), fixture.call('add_shopping_item', { title: 'Apples' })));
     await send(page, 'add apples to shopping list');
-    assert.match(await page.locator('#chat').innerText(), /repeated an already completed operation/);
+    assert.match(await page.locator('#chat').innerText(), /Stopped a repeated proposal/);
+    assert.doesNotMatch(await page.locator('#status').innerText(), /Request failed/);
     assert.equal(await page.evaluate(() => fixture.executions.filter(call => call.name === 'add_shopping_item' && call.args.title === 'Apples').length), 1);
     assert.equal(await page.locator('#retry-message').isVisible(), false);
     if (options.nativeToolUse) {
