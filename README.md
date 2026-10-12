@@ -25,7 +25,13 @@ For local WebMCP testing, open `chrome://flags/#enable-webmcp-testing`, set **We
 
 Create Projects, Roles, Areas of Responsibility, Checklists, Shopping Lists or Tasks. Any item can have children; a container opens a child list and a leaf Task opens its labeled detail form. Save is explicit. Parent selection moves an entire subtree and prevents cycles. Delete permanently removes the exact confirmed subtree. Navigation offers Save, Discard or Cancel when a draft is dirty.
 
-The local assistant discovers this page’s ten registered native tools, asks the model for a constrained proposal, validates it, executes through WebMCP and supplies the actual tool result for the next response. This is an application-owned bridge over the two native APIs. Tool permissions are enforced inside callbacks for external callers too. Allow once or for this chat, revoke permission in Tools, and confirm every deletion separately. Stop cancels pending work; a previously committed change remains saved. Each user turn executes at most six tools. Chat session context is bounded through cloned turns where supported; otherwise start a new chat after ten turns.
+Speak naturally to the assistant, for example **add bananas to shopping list** or **completed research for new car**. It resolves existing names and relationships, asks when a target is ambiguous, and uses the page's tools to perform the requested operations. Shopping entries are Tasks beneath a Shopping List; completion updates an existing task's status.
+
+The model selects readable schema enum choices for existing items and lists. Storage IDs stay inside the app and its native callbacks. New titles remain free text; newly created items become selectable on the next request. Shopping creation handles its container and entry together in one transaction.
+
+The assistant uses native Prompt API tool calls when `chrome://flags/#prompt-api-tool-use` is enabled and the typed interfaces are exposed. Otherwise it uses a constrained JSON proposal with each tool's actual argument schema. Both paths discover this page’s twelve native WebMCP tools, validate proposals, execute through WebMCP and return verified results to the model. Tools & diagnostics reports the active path. See [harness research and behavior](docs/harness.md) and [natural-language review](docs/natural-language-review.md).
+
+Tool permissions are enforced inside callbacks for external callers too. Allow once or for this chat, revoke permission in Tools, and confirm every deletion separately. Stop cancels pending work; a previously committed change remains saved. Each user turn executes at most six tools, and repeated completed writes are stopped. Native sessions receive current parameter choices in a fresh session per user request. The JSON bridge uses cloned turns where supported; otherwise start a new chat after ten turns.
 
 Weekly review has all eleven Get clear / Get current / Get creative steps. The user marks each step complete or skipped. Pause and reload preserve progress without replaying AI actions. Calendar review asks you to consult your own calendar; this app has no calendar connection.
 
@@ -43,6 +49,7 @@ Shared production logic has a built-in Node assertion check:
 
 ```sh
 node tests/self-check.mjs
+node tests/harness-check.mjs
 ```
 
 Development-only browser checks use an existing Playwright installation. No runtime or repository dependency is added. Set `PLAYWRIGHT_MODULE_PATH` to its module directory (or configure `NODE_PATH`), serve the app, then run:
@@ -50,6 +57,9 @@ Development-only browser checks use an existing Playwright installation. No runt
 ```sh
 node tests/browser-review.cjs
 node tests/native-contract.cjs
+node tests/natural-workflows.cjs
+node tests/workflow-operations.cjs
+node tests/catalog-continuation.cjs
 node tests/reviewer-check.cjs
 node tests/pwa-check.cjs
 ```

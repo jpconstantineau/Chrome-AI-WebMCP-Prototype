@@ -43,14 +43,16 @@ export function filterItems(items, filters = {}) {
 }
 const str = (maxLength = 200) => ({ type: 'string', maxLength });
 const idSchema = { type: 'string', minLength: 1, maxLength: 200 };
-const parentSchema = { type: ['string', 'null'], maxLength: 200 };
-const fields = { title: { ...str(), minLength: 1 }, type: { type: 'string', enum: TYPES }, description: str(10000), status: { type: 'string', enum: STATUSES }, context: str(), parentId: parentSchema };
+const parentSchema = { type: ['string', 'null'], maxLength: 200, description: 'The actual ID of an existing container or parent from tool results. Null means Inbox. A shopping entry uses its Shopping List ID.' };
+const fields = { title: { ...str(), minLength: 1 }, type: { type: 'string', enum: TYPES, description: 'Task means a thing to do or buy, such as Bananas. Shopping List means the container itself, such as Groceries, never the item to buy. New items default to Task; omit on updates unless changing type.' }, description: str(10000), status: { type: 'string', enum: STATUSES, description: 'Completed marks an existing task done; Open means still to do.' }, context: { ...str(), description: 'Optional text such as @Home. Omit when unspecified; do not use null.' }, parentId: parentSchema };
 const schema = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const filters = { search: str(), status: fields.status, context: str() };
 export const TOOLS = [
-  ['list_items', 'Find items. Omitted parentId searches all items; null means Inbox.', schema({ parentId: parentSchema, type: fields.type, ...filters, limit: { type: 'integer', minimum: 1, maximum: 100 } }), true],
+  ['add_shopping_item', 'Add a thing to buy to a Shopping List as a child Task. Reuse an existing list, or create a Shopping List container if absent. If more than one list is possible, ask which list. Do not create a Shopping List named after the purchase. An existing completed purchase is reopened; an existing open purchase is not duplicated.', schema({ title: { ...str(), minLength: 1 }, listTitle: { ...str(), minLength: 1 } }, ['title']), false],
+  ['complete_task', 'Mark an existing Task completed by its title. Resolve exact title first. Ambiguous or missing tasks return a clarification question without changing anything. Changes only status; never creates or deletes a task.', schema({ title: { ...str(), minLength: 1 } }, ['title']), false],
+  ['list_items', 'Find existing items and their IDs by type or title search. Search Shopping List containers before adding purchases; search Tasks before marking them completed. parentId selects children of a list. Omitted parentId searches all items; null means Inbox.', schema({ parentId: parentSchema, type: fields.type, ...filters, limit: { type: 'integer', minimum: 1, maximum: 100 } }), true],
   ['read_item', 'Read one item and its immediate child IDs.', schema({ id: idSchema }, ['id']), true],
-  ['create_item', 'Create an item. Defaults: Task, Open, Inbox.', schema(fields, ['title']), false],
+  ['create_item', 'Create a Task for a thing to do or buy. A purchase such as Bananas is type Task, with parentId set to the actual Shopping List ID. To create the container itself, use type Shopping List and a container title such as Shopping List or Groceries. Find or create that container before adding its Task. Defaults: Task, Open, Inbox.', schema(fields, ['title']), false],
   ['update_item', 'Update editable attributes of an existing item.', schema({ id: idSchema, patch: { ...schema(fields), minProperties: 1 } }, ['id', 'patch']), false],
   ['delete_item', 'Permanently delete an item and all descendants. Always requires explicit app confirmation.', schema({ id: idSchema }, ['id']), false],
   ['list_attributes', 'List attributes, allowed types/statuses and parent rules.', schema({}), true],
@@ -81,7 +83,60 @@ export function validateTool(name, args) {
   if (name === 'show_view' && (Object.hasOwn(args, 'view') === Object.hasOwn(args, 'itemId'))) fail('Choose exactly one view or itemId.');
   return args;
 }
-export const RESPONSE_SCHEMA = schema({ message: { type: 'string', maxLength: 8000 }, tool: { anyOf: [{ type: 'null' }, schema({ name: { type: 'string', enum: TOOLS.map(tool => tool.name) }, arguments: { type: 'object' } }, ['name', 'arguments'])] } }, ['message', 'tool']);
+function normalizedTitle(title) { return title.trim().replace(/\s+/gu, ' ').toLowerCase(); }
+export function planWorkflow(name, args, items) {
+  if (!['add_shopping_item', 'complete_task'].includes(name)) fail('Unknown workflow.');
+  validateTool(name, args);
+  const title = args.title.trim(), listTitle = args.listTitle?.trim();
+  if (!title || (Object.hasOwn(args, 'listTitle') && !listTitle)) fail('A nonempty title is required.');
+  const normalized = normalizedTitle(title), mutations = [], relevant = new Map();
+  const remember = records => { for (const item of records) relevant.set(item.id, item); };
+  const candidate = item => ({ id: item.id, title: item.title, parentTitle: items.find(parent => parent.id === item.parentId)?.title || 'Inbox' });
+  function finish(result, effect) {
+    const records = [...relevant.values()].sort((a, b) => a.id.localeCompare(b.id)).map(item => Object.fromEntries(ATTRIBUTES.map(attribute => [attribute, item[attribute]])));
+    return { ok: true, summary: result.message, effect, snapshot: JSON.stringify({ name, title: normalized, listTitle: listTitle === undefined ? null : normalizedTitle(listTitle), outcome: result.outcome, effect, records }), mutations, result };
+  }
+  function clarify(question, records) {
+    remember(records);
+    const candidates = records.map(candidate);
+    return finish({ outcome: 'clarification', message: question, question, candidates }, { action: 'Ask for clarification; no items will change', question, candidates });
+  }
+  if (name === 'complete_task') {
+    const tasks = items.filter(item => item.type === 'Task');
+    const exact = tasks.filter(item => normalizedTitle(item.title) === normalized);
+    // shortcut: conservative whole-word phrase matching only; no fuzzy guessing.
+    const matching = exact.length ? exact : tasks.filter(item => ` ${normalizedTitle(item.title)} `.includes(` ${normalized} `));
+    if (!matching.length) return clarify(`No task matches “${title}”. Which existing task should I complete?`, tasks);
+    if (matching.length > 1) return clarify(`Several tasks match “${title}”. Which one should I complete?`, matching);
+    const task = matching[0]; remember([task]); const parent = items.find(item => item.id === task.parentId); if (parent) remember([parent]);
+    const already = task.status === 'Completed';
+    if (!already) mutations.push({ kind: 'update', id: task.id, patch: { status: 'Completed' } });
+    return finish({ outcome: already ? 'already_completed' : 'completed', message: already ? `“${task.title}” is already completed.` : `Marked “${task.title}” completed.`, item: task }, { action: already ? 'No change; task is already completed' : 'Mark existing task completed', task: candidate(task), fromStatus: task.status, toStatus: 'Completed', changes: already ? [] : ['status only'] });
+  }
+  const lists = items.filter(item => item.type === 'Shopping List');
+  const matchingLists = listTitle === undefined ? lists : lists.filter(item => normalizedTitle(item.title) === normalizedTitle(listTitle));
+  remember(matchingLists);
+  if (matchingLists.length > 1) return clarify(listTitle === undefined ? 'Which shopping list should I add this item to?' : `Several shopping lists match “${listTitle}”. Which one should I use?`, matchingLists);
+  const list = matchingLists[0];
+  const targetTitle = list?.title || listTitle || 'Shopping List';
+  const children = list ? items.filter(item => item.type === 'Task' && item.parentId === list.id && normalizedTitle(item.title) === normalized) : [];
+  remember(children);
+  if (children.length > 1) return clarify(`Several purchases named “${title}” are in “${targetTitle}”. Which one should I use?`, children);
+  const child = children[0];
+  if (!list) mutations.push({ kind: 'create', ref: 'list', patch: { title: targetTitle, type: 'Shopping List' } });
+  if (!child) mutations.push({ kind: 'create', ref: 'item', patch: { title, type: 'Task', parentId: list?.id || null }, ...(!list ? { parentRef: 'list' } : {}) });
+  else if (child.status === 'Completed') mutations.push({ kind: 'update', id: child.id, patch: { status: 'Open' } });
+  const outcome = !child ? 'created' : child.status === 'Completed' ? 'reopened' : 'already_listed';
+  const message = outcome === 'created' ? `Added “${title}” to “${targetTitle}”.` : outcome === 'reopened' ? `Reopened “${child.title}” in “${targetTitle}”.` : `“${child.title}” is already listed in “${targetTitle}”.`;
+  return finish({ outcome, message, ...(child ? { item: child } : {}), ...(list ? { list } : {}) }, { action: outcome === 'created' ? 'Add a shopping Task' : outcome === 'reopened' ? 'Reopen an existing shopping Task' : 'No change; purchase is already listed', shoppingList: { ...(list ? { id: list.id } : {}), title: targetTitle, create: !list }, purchase: { ...(child ? { id: child.id } : {}), title: child?.title || title, type: 'Task' }, changes: mutations.map(change => change.kind === 'create' ? `Create ${change.patch.type}: ${change.patch.title}` : `Change status from ${child.status} to Open only`) });
+}
+// Chrome 154's model decoder rejects these keywords. Full validation still uses TOOLS.
+export function decoderSchema(value) {
+  if (Array.isArray(value)) return value.map(decoderSchema);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !['oneOf', 'not', 'minProperties'].includes(key)).map(([key, item]) => [key, decoderSchema(item)]));
+}
+export const RESPONSE_SCHEMA = schema({ message: { type: 'string', maxLength: 8000 }, tool: { anyOf: [{ type: 'null' }, ...TOOLS.map(tool => schema({ name: { type: 'string', enum: [tool.name] }, arguments: decoderSchema(tool.inputSchema) }, ['name', 'arguments']))] } }, ['message', 'tool']);
 export function parseEnvelope(text) {
   if (typeof text !== 'string' || text.length > 25000) fail('The model returned an invalid response.');
   let result; try { result = JSON.parse(text); } catch { fail('The model did not return valid JSON.'); }

@@ -1,4 +1,4 @@
-import { validateItem, descendants, fail } from './workspace.js';
+import { validateItem, descendants, fail, planWorkflow } from './workspace.js';
 export const DB_NAME = 'chrome-ai-webmcp-prototype';
 export function openDatabase(onClose) {
   return new Promise((resolve, reject) => {
@@ -51,7 +51,26 @@ export function mutate(db, action, signal) {
         const previous = action.id ? items.find(item => item.id === action.id) : null;
         if (action.id && !previous) fail('Item no longer exists.', 'stale');
         if (action.expected && previous.updatedAt !== action.expected) fail('Item changed. Reload and review before saving.', 'stale');
-        if (action.kind === 'delete') {
+        if (action.kind === 'workflow') {
+          const plan = planWorkflow(action.name, action.args, items);
+          if (plan.snapshot !== action.snapshot) fail('The workflow targets changed. Review the resolved action and approve again.', 'stale');
+          const changedItems = [], refs = new Map(), working = [...items];
+          for (const change of plan.mutations) {
+            if (signal?.aborted) fail('Action cancelled.', 'cancelled');
+            const previous = change.kind === 'update' ? working.find(item => item.id === change.id) : null;
+            const patch = { ...change.patch, ...(change.parentRef ? { parentId: refs.get(change.parentRef)?.id } : {}) };
+            const value = validateItem(patch, working, previous);
+            const now = new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString();
+            const item = { ...value, id: previous?.id || crypto.randomUUID(), createdAt: previous?.createdAt || now, updatedAt: now };
+            store.put(item); changedItems.push(item);
+            if (change.ref) refs.set(change.ref, item);
+            const index = working.findIndex(record => record.id === item.id); if (index < 0) working.push(item); else working[index] = item;
+          }
+          result = { ...plan.result, changedItems };
+          const itemId = refs.get('item')?.id || plan.result.item?.id, listId = refs.get('list')?.id || plan.result.list?.id;
+          if (itemId) result.item = working.find(item => item.id === itemId);
+          if (listId) result.list = working.find(item => item.id === listId);
+        } else if (action.kind === 'delete') {
           const subtree = descendants(items, action.id);
           if (JSON.stringify(snapshot(subtree)) !== JSON.stringify(action.snapshot)) fail('The deletion targets changed. Review and confirm again.', 'stale');
           for (const item of subtree) store.delete(item.id);
@@ -63,7 +82,7 @@ export function mutate(db, action, signal) {
           result = { ...value, id: previous?.id || crypto.randomUUID(), createdAt: previous?.createdAt || now, updatedAt: now };
           store.put(result);
         }
-      } catch (caught) { error = caught; tx.abort(); }
+      } catch (caught) { error = caught; try { tx.abort(); } catch { /* A caller may have already aborted this transaction. */ } }
     };
     tx.oncomplete = () => { signal?.removeEventListener('abort', abort); resolve(result); };
     tx.onabort = tx.onerror = () => { signal?.removeEventListener('abort', abort); reject(error || Object.assign(new Error(signal?.aborted ? 'Action cancelled.' : 'Storage transaction failed.'), { code: signal?.aborted ? 'cancelled' : 'storage' })); };

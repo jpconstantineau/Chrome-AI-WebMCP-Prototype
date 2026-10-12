@@ -1,14 +1,22 @@
 // Only the dev test runner injects these doubles. Production has no test switch.
 module.exports = function fixture(options = {}) {
-  window.fixture = { options, responses: [], prompts: [], executions: [], registrations: [], destroys: 0, creates: 0, tools: new Map() };
+  window.fixture = { options, responses: [], prompts: [], modelSettings: [], executions: [], registrations: [], destroys: 0, creates: 0, tools: new Map() };
   const f = window.fixture;
+  if (options.nativeToolUse) {
+    window.LanguageModelToolCall = class LanguageModelToolCall { constructor(value) { Object.assign(this, value); } };
+    window.LanguageModelToolSuccess = class LanguageModelToolSuccess { constructor(value) { Object.assign(this, value); } };
+    window.LanguageModelToolError = class LanguageModelToolError { constructor(value) { Object.assign(this, value); } };
+  }
   function session() { return {
     async clone() { return session(); },
     async prompt(input, settings) {
-      f.prompts.push({ input: JSON.parse(typeof input === 'string' ? input : input[0].content), userMessage: Array.isArray(input) ? input.at(-1).content : null, constrained: !!settings.responseConstraint });
-      const response = f.responses.shift() || { message: 'What needs your attention next?', tool: null };
+      const context = typeof input === 'string' ? input : typeof input[0]?.content === 'string' ? input[0].content : null;
+      f.prompts.push({ input: context ? JSON.parse(context) : null, messages: input, userMessage: Array.isArray(input) ? input.at(-1).content : null, constrained: !!settings.responseConstraint });
+      let response = f.responses.shift() || { message: 'What needs your attention next?', tool: null };
+      if (typeof response === 'function') response = response(f);
       if (response.delay) { await new Promise(resolve => setTimeout(resolve, response.delay)); return JSON.stringify(response.envelope); }
       if (response.error) throw new Error(response.error);
+      if (f.options.nativeToolUse) return Array.isArray(response) ? response : [{ type: 'text', value: response.message || String(response) }];
       return typeof response === 'string' ? response : JSON.stringify(response);
     }, destroy() { f.destroys++; }
   }; }
@@ -16,6 +24,7 @@ module.exports = function fixture(options = {}) {
     async availability() { return f.options.availability || 'available'; },
     async create(settings) {
       f.creates++;
+      f.modelSettings.push({ tools: settings.tools, expectedInputs: settings.expectedInputs, expectedOutputs: settings.expectedOutputs });
       if (settings.monitor) { const monitor = new EventTarget(); settings.monitor(monitor); const event = new Event('downloadprogress'); event.loaded = .4; monitor.dispatchEvent(event); }
       if (f.options.createDelay) await new Promise(resolve => setTimeout(resolve, f.options.createDelay));
       if (f.options.createError) throw new Error('Fixture model download failed');

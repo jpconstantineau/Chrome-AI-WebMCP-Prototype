@@ -1,6 +1,6 @@
 const PREFIX = 'chrome-ai-webmcp-cache-';
-const CACHE = `${PREFIX}v2`;
-const ASSETS = ['./', './index.html', './styles.css', './app.js', './workspace.js', './storage.js', './manifest.webmanifest', './icon.svg', './icon-192.png'];
+const CACHE = `${PREFIX}v3`;
+const ASSETS = ['./', './index.html', './styles.css', './app.js', './harness.js', './workspace.js', './storage.js', './manifest.webmanifest', './icon.svg', './icon-192.png'];
 const SHELL = new Set(ASSETS.map(path => new URL(path, self.registration.scope).href));
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith(PREFIX) && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())));
