@@ -1,5 +1,7 @@
 # Independent implementation review
 
+This initial review preceded enabling Chrome's WebMCP testing flag. See the subsequent [native Chrome retest](native-review.md) for real model/tool execution, compatibility fixes and its current verification status.
+
 Reviewed on 2026-10-11 against the existing code, AGENTS.md, INTENT.md, DESIGN.md, the repository ponytail skill, and the design/flows/implementation plan in this folder. The review agent read the production modules and test fixtures, reran the existing checks, and independently drove browser UI interactions using installed Chrome. The root agent also opened the unmodified app in connected Chrome.
 
 ## Release verdict

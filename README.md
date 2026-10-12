@@ -19,6 +19,8 @@ Both native interfaces are required before the editable workspace opens:
 
 Follow the official setup and model/device requirements above. A recent Chrome version alone does not guarantee the experimental WebMCP interface is exposed. Missing interfaces show a blocking error with Retry; there is no demo or fallback runtime. Downloadable models require an explicit approval and Chrome manages their download. Continue creates the local session even when the model is already available.
 
+For local WebMCP testing, open `chrome://flags/#enable-webmcp-testing`, set **WebMCP for testing** to **Enabled**, then relaunch Chrome. The app accepts Chrome 154's serialized tool schemas/arguments and the newer object contract; it uses the native discovered descriptor to select the format without retrying a dispatched write.
+
 ## Use
 
 Create Projects, Roles, Areas of Responsibility, Checklists, Shopping Lists or Tasks. Any item can have children; a container opens a child list and a leaf Task opens its labeled detail form. Save is explicit. Parent selection moves an entire subtree and prevents cycles. Delete permanently removes the exact confirmed subtree. Navigation offers Save, Discard or Cancel when a draft is dirty.
@@ -47,8 +49,11 @@ Development-only browser checks use an existing Playwright installation. No runt
 
 ```sh
 node tests/browser-review.cjs
+node tests/native-contract.cjs
 node tests/reviewer-check.cjs
 node tests/pwa-check.cjs
 ```
 
 `APP_URL` defaults to `http://127.0.0.1:8765`; `BROWSER_CHANNEL` defaults to installed `chrome`. The browser runners inject isolated Prompt API/WebMCP doubles before loading production files and use real IndexedDB and DOM interactions. They write desktop/320px screenshots under `docs/review-assets`; the independent reviewer check also verifies the native startup gate without injection. The PWA runner serves these same static assets under a temporary localhost subpath solely for cache/offline verification. Doubles verify app behavior; they do not prove native model inference or native WebMCP compatibility. Review must also open the unmodified app in a real browser and report any absent native interface.
+
+The [native Chrome retest](docs/native-review.md) records real model/tool execution, permission approval, persisted data, compatibility fixes and remaining evidence limits.
