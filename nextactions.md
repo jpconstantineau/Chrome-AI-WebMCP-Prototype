@@ -1,6 +1,6 @@
 # Recommended next actions
 
-Prepared **2026-10-12**, after completing the source research requested in [ChromeAI.md](ChromeAI.md). This is a future-work plan. No implementation, browser configuration, model download, or app test was changed/performed by this research. Start with the [research index](docs/research/README.md) and [proposed browser architecture](docs/research/browser-agent-architecture.md); the individual chapters contain precise source/version evidence and unexecuted examples.
+Prepared **2026-10-12**, after completing the source research supplied in the maintainer's local `ChromeAI.md`. Its source inventory is preserved in the published research index. This is a future-work plan. No implementation, browser configuration, model download, or app test was changed/performed by this research. Start with the [research index](docs/research/README.md) and [proposed browser architecture](docs/research/browser-agent-architecture.md); the individual chapters contain precise source/version evidence and unexecuted examples.
 
 The recommended direction is **one trusted browser host, two Prompt API proposal adapters, and narrowly scoped specialists**. Keep the existing constrained JSON bridge, native own-page WebMCP execution, readable enum choices, explicit permissions, strict callbacks, and IndexedDB transactions. Borrow Pi's lifecycle and supervision patterns without importing its Node runtime or copying its parallel/retry defaults.
 
