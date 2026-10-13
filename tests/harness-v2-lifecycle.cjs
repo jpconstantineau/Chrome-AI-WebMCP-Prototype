@@ -60,7 +60,7 @@ async function diagnostics(page) { await page.locator('#tools-button').click(); 
       const descriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
       Object.defineProperty(IDBTransaction.prototype, 'oncomplete', { ...descriptor, set(handler) { const tx = this; descriptor.set.call(this, tx.mode === 'readwrite' && [...tx.objectStoreNames].some(store => ['items', 'reviews'].includes(store)) ? function(event) { queueMicrotask(() => document.querySelector('#stop').click()); handler.call(tx, event); } : handler); } });
     }, name);
-    await send(page, `Perform authorized receipt check ${name}.`); await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await send(page, `Update authorized receipt check ${name}.`); await page.getByRole('button', { name: 'Allow once', exact: true }).click();
     if (name === 'delete_item') await page.getByRole('button', { name: 'Allow delete (1)', exact: true }).click();
     await idle(page); await page.waitForTimeout(80);
     const info = await diagnostics(page); assert.equal(info.lastRun.reason, 'cancellation'); assert.equal(info.lastRun.totals.dispatches, 1);

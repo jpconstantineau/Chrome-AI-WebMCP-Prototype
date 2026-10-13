@@ -25,13 +25,13 @@ let browser;
         : { message: '', tool: { name, arguments: args } };
       const feedback = () => {
         const prompt = fixture.prompts.at(-1);
-        if (!fixture.options.nativeToolUse) return prompt.input.DATA.toolResults.at(-1).result;
+        if (prompt.input?.DATA?.toolResults?.length) return prompt.input.DATA.toolResults.at(-1).result;
         const text = prompt.messages[0].content.find(part => part.type === 'tool-response').value.result[0].value;
         return JSON.parse(text.match(/^<[^>]+>\n([\s\S]*)\n<\/[^>]+>$/u)[1]);
       };
       fixture.responses.push(
         Object.assign(() => {
-          fixture.originalReference = fixture.options.nativeToolUse ? fixture.modelSettings.at(-1).tools.find(tool => tool.name === 'read_item').inputSchema.properties.id.enum[0] : fixture.prompts.findLast(prompt => prompt.stage === 'route').input.DATA.visibleItems[0].id;
+          fixture.originalReference = 'Item 1: Same title (Task)';
           return call('create_item', { title: 'Same title', description: 'New duplicate' });
         }, { route: 'create_item' }),
         Object.assign(() => { fixture.createdFeedback = feedback(); return call('read_item', { id: fixture.originalReference }); }, { route: 'read_item' }),

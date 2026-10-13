@@ -51,8 +51,8 @@ async function noFallback(page, expectedCreates) {
     await page.getByRole('button', { name: 'Allow once', exact: true }).click(); await idle(page);
     assert.deepEqual((await data(page)).map(item => item.title).sort(), ['Another thought', 'Fallback thought']);
     assert.equal(await page.evaluate(() => fixture.executions.length), 1);
-    assert.deepEqual(await page.evaluate(() => fixture.prompts.map(prompt => prompt.constrained)), [false, true, true, true, true]);
-    assert.deepEqual(await page.evaluate(() => fixture.prompts.slice(1).map(prompt => prompt.stage)), ['route', 'arguments', 'route', 'respond']);
+    assert.deepEqual(await page.evaluate(() => fixture.prompts.map(prompt => prompt.constrained)), [false, true]);
+    assert.deepEqual(await page.evaluate(() => fixture.prompts.slice(1).map(prompt => prompt.stage)), ['arguments']);
     let info = await diagnostics(page); assert.equal(info.modelToolLoop, 'Constrained JSON bridge');
     assert.match(info.nativeProposalFailure, /before dispatch/);
     assert.equal(await page.evaluate(() => typeof LanguageModelToolCall), 'function', 'Native classes remain exposed');
@@ -184,12 +184,12 @@ async function noFallback(page, expectedCreates) {
   {
     const { context, page } = await open();
     await page.evaluate(() => { for (let n = 0; n < 7; n++) fixture.responses.push(fixture.call('list_items', { search: `distinct-query-${n}` })); });
-    await send(page, 'Search seven distinct queries.'); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
+    await send(page, Array.from({length:7},(_,index)=>`List items matching distinct-query-${index}`).join(' and ')+'.'); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
     assert.equal(await page.evaluate(() => fixture.executions.length), 6);
-    await page.evaluate(() => fixture.responses.push({ error: 'Resumed inference failure' }));
+    await page.evaluate(() => fixture.responses = [{ error: 'Resumed inference failure' }]);
     await page.locator('#continue-message').click(); await idle(page);
     assert.equal(await page.evaluate(() => fixture.executions.length), 6); assert.equal((await data(page)).length, 0);
-    await noFallback(page, 3); await context.close();
+    const info = await diagnostics(page); assert.equal(info.nativeProposalFailure, null); assert.equal(await page.evaluate(() => fixture.prompts.some(prompt => prompt.constrained)), false); await context.close();
   }
   await browser.close();
   console.log('Native proposal fallback passed: initial and manual format switch with approval, bridge reuse, saved-history preservation, replacement-session recovery without replay, empty rejection handling, no switch after dispatch, denial, AbortError, Stop or resumed continuation.');

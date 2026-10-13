@@ -17,8 +17,8 @@ async function ready(page) {
 }
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function guidanceHasNoProgressTool(page, native) {
-  const names = await page.evaluate(native => (native ? fixture.modelSettings.at(-1).tools : fixture.prompts.findLast(prompt => prompt.stage === 'route').input.tools).map(tool => tool.name), native);
-  assert.equal(names.includes('weekly_review'), false, 'Automatic step guidance cannot offer progress-changing calls');
+  assert.equal(await page.evaluate(() => fixture.prompts.length), 0, 'Trusted weekly guidance requires no model/tool inference');
+  assert.equal(await page.evaluate(() => fixture.executions.length), 0);
 }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });

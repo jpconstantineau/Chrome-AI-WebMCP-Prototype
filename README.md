@@ -35,7 +35,7 @@ For a mind dump, say **capture compare car insurance, book a test drive, and ren
 
 For a strict new-Project choice, say **move Book a test drive under a new Project named "Choose a new car"**. The unambiguous supplied name becomes the required new destination, excluding existing destinations. Explicitly named known Tasks also narrow the title choices for capture-independent move/completion/status workflows. Broad task scopes remain available. These schema guards reduce wrong proposals; inspect the permission card because local-model routing can still make mistakes.
 
-The assistant starts with the constrained JSON bridge: the local model selects an operation, fills that operation's argument schema, then receives its verified result. Conversation and clarification use a separate reply stage. Both transports execute through the page's native WebMCP interface. Standard mode exposes twelve model operations; Full mode exposes all sixteen for experiments. All sixteen remain registered with WebMCP. Tools & diagnostics reports the active path and offers a Chromium-compatible schema profile or a profile retaining parameter descriptions. See [harness behavior](docs/harness.md) and [natural-language review](docs/natural-language-review.md).
+The assistant starts with the constrained JSON bridge. Recognized requests provide a finite operation plan; the local model fills each operation's narrowed argument schema and receives its verified result. Unrecognized actionable wording uses bounded model routing, while explicit clarification can be answered directly without inference or tools. Both transports execute through the page's native WebMCP interface. Standard mode exposes twelve model operations; Full mode exposes all sixteen for experiments. All sixteen remain registered with WebMCP. Tools & diagnostics reports the active path and offers a Chromium-compatible schema profile or a profile retaining parameter descriptions. See [harness behavior](docs/harness.md) and [natural-language review](docs/natural-language-review.md).
 
 Native Prompt API proposals require exposed typed interfaces and an explicit **Test native tool calls** canary. The canary requests one read-only tool and requires **Allow once**, independently of chat grants. Only a successful test enables **Use native proposals**. The experimental `chrome://flags/#prompt-api-tool-use` flag alone does not establish support or stability; see the [flag research](docs/research/chrome-prompt-api-tool-use.md).
 
@@ -49,7 +49,11 @@ One inference runs at a time. Each disposable worker receives bounded context wi
 
 Use **Ask reviewer** in Inbox or a Project, or explicitly request its review in chat, to obtain advice from a fresh tool-free local session. Its typed report is checked against the captured scope and workspace revision. It cannot edit items, delegate further or inherit permissions. Applying advice requires a new instruction from you.
 
-Weekly review has all eleven Get clear / Get current / Get creative steps. Start or resume from the review controls, or say **start my weekly review**. The assistant can complete or skip the current step only when you ask; each such tool action requires fresh permission even after Allow for this chat. Only one review transition can execute per user turn. After a successful item operation, send a separate message to change the review; remaining requested item operations or reads can finish in the same turn. Saved changes retain factual receipts when a later proposal is blocked or fails. UI-generated step guidance can read data and select views; it has no item-write or review-control tools. Pause and reload preserve progress; reload pauses an active review without replaying model work. Resume returns to the saved step. Calendar review asks you to consult your own calendar; this app has no calendar connection.
+The harness plans the current request before inference, narrows each operation's target and value choices, and ends after the requested effects are fulfilled. Historical turns cannot add work. Explicit clarification and no-tools requests produce grounded questions without dispatching tools. An undecided Project move can continue with a fresh answer such as **Use Home improvements**, followed by ordinary permission; Stop, New chat and reload discard that pending authority. Ambiguous or contradictory changes require clarification.
+
+For context edits, say **Set the context of Sketch a reading nook layout to "@Someday/Maybe"**. The model receives a context-only patch and the exact supplied value as an enum choice. Quoted values preserve spaces, case, punctuation and the `@` marker; **clear the context of Sketch a reading nook layout** saves an empty string. The permission preview shows the old and new context. These assignments are separate from substring view filters.
+
+Weekly review has all eleven Get clear / Get current / Get creative steps. Start or resume from the review controls, or say **start my weekly review**. The assistant can complete or skip the current step only when you ask; each such tool action requires fresh permission even after Allow for this chat. Only one review transition can execute per user turn. After a successful item operation, send a separate message to change the review; remaining requested item operations or reads can finish in the same turn. Saved changes retain factual receipts when a later proposal is blocked or fails. UI-generated step guidance displays the current step's instruction and question without model inference or tools. Pause and reload preserve progress; reload pauses an active review without replaying model work. Resume returns to the saved step. Calendar review asks you to consult your own calendar; this app has no calendar connection.
 
 Tools shows native discovery, schemas, session capabilities, usage, bounded run events and optional local diagnostic export. Build notes are manually supplied because Chrome does not expose every relevant configuration detail. Download progress reaching 100% still shows preparation until session creation succeeds. In native proposal mode, **Use JSON proposals** returns to the compatibility path for this page session. Use the mobile Lists / Content / Assistant buttons to switch panels while preserving drafts. Theme and hierarchy selection are saved locally. Install appears when Chrome offers its native installation prompt. The cached shell includes both agent modules and can load offline; a compatible browser and an available local model are still required. Shell updates revalidate network assets to avoid retaining old code in a new cache.
 
@@ -60,6 +64,8 @@ Clearing browser site data removes local lists/history. There is no sync or auto
 - [App design](docs/app-design.md), [flows](docs/flows.md), [implementation plan](docs/implementation-plan.md).
 - [Harness v2 design](docs/harness-design-v2.md), [committed implementation plan](docs/harness-implementation-plan-v2.md), and [Chrome/Pi research](docs/research/README.md).
 - [Harness v2 implementation checks](docs/harness-v2-implementation.md) and [real Chrome trial](docs/harness-v2-trial.md).
+- [Routing fix plan](docs/routing-fix-plan.md) and [real Chrome routing retest](docs/routing-fix-trial.md).
+- [Routing implementation checks](docs/routing-fix-implementation.md) record current-request scope and clarification regressions.
 - [Maintainer intent](INTENT.md), [design guidance](DESIGN.md), [agent instructions](AGENTS.md).
 - [Independent review evidence](docs/review.md) records release checks and native browser limitations.
 
@@ -70,6 +76,7 @@ node tests/self-check.mjs
 node tests/harness-check.mjs
 node tests/agent-host-check.mjs
 node tests/agent-context-check.mjs
+node tests/request-policy-check.mjs
 ```
 
 Development-only browser checks use an existing Playwright installation. No runtime or repository dependency is added. Set `PLAYWRIGHT_MODULE_PATH` to its module directory (or configure `NODE_PATH`), serve the app, then run:
@@ -94,6 +101,9 @@ node tests/harness-v2-context.cjs
 node tests/harness-v2-reviewer.cjs
 node tests/harness-v2-focus.cjs
 node tests/harness-v2-guidance.cjs
+node tests/routing-fix-browser.cjs
+node tests/routing-mind-dump.cjs
+node tests/routing-restatements.cjs
 ```
 
 `APP_URL` defaults to `http://127.0.0.1:8765`; `BROWSER_CHANNEL` defaults to installed `chrome`. The browser runners inject isolated Prompt API/WebMCP doubles before loading production files and use real IndexedDB and DOM interactions. They write desktop/320px screenshots under `docs/review-assets`; the independent reviewer check also verifies the native startup gate without injection. The PWA runner serves these same static assets under a temporary localhost subpath solely for cache/offline verification. Doubles verify app behavior; they do not prove native model inference or native WebMCP compatibility. Review must also open the unmodified app in a real browser and report any absent native interface.

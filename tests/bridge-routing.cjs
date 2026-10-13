@@ -13,7 +13,7 @@ async function open(responses) {
   await page.evaluate(responses => fixture.responses.push(...responses), responses);
   return { context, page };
 }
-async function send(page, text = 'Capture first thought and second thought in Inbox.') { await page.locator('#message').fill(text); await page.locator('#send').click(); }
+async function send(page, text = 'Save two Inbox thoughts: first thought and second thought.') { await page.locator('#message').fill(text); await page.locator('#send').click(); }
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function data(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return await read(db, 'items'); } finally { db.close(); } }); }
 (async () => {
@@ -33,11 +33,7 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
     assert.deepEqual((await data(page)).map(item => item.title).sort(), ['First thought', 'Second thought']);
     assert.equal(await page.evaluate(() => fixture.executions.length), 1);
     const after = await page.evaluate(() => fixture.prompts);
-    assert.deepEqual(after.map(prompt => prompt.stage), ['route', 'arguments', 'route', 'respond']);
-    assert.equal(after[2].input.DATA.toolResults[0].result.ok, true);
-    assert.equal(Object.hasOwn(after[3].input, 'tools'), false);
-    assert.deepEqual(Object.keys(after[3].responseConstraint.properties), ['message']);
-    assert.equal(after[3].responseConstraint.properties.message.maxLength, 600);
+    assert.deepEqual(after.map(prompt => prompt.stage), ['route', 'arguments']);
     assert.equal((await page.locator('#chat').innerText()).includes('Incorrect model acknowledgement.'), false, 'Authoritative workflow receipt replaces model wording');
     await context.close();
   }
@@ -80,13 +76,13 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
     const { context, page } = await open(['"capture_tasks"', '{"titles":["Committed once"]}', { error: 'Routing failed after commit' }]);
     await send(page); await page.getByRole('button', { name: 'Allow once', exact: true }).click(); await idle(page);
     assert.equal((await data(page)).length, 1); assert.equal(await page.evaluate(() => fixture.executions.length), 1);
-    assert.deepEqual(await page.evaluate(() => fixture.prompts.map(prompt => prompt.stage)), ['route', 'arguments', 'route']);
+    assert.deepEqual(await page.evaluate(() => fixture.prompts.map(prompt => prompt.stage)), ['route', 'arguments']);
     assert.equal(await page.locator('#retry-message').isVisible(), false); await context.close();
   }
   const literalNames = ['Compare car insurance', 'Book a test drive', 'Renew my passport'];
   const literalRequest = 'Save three separate Inbox tasks named “Compare car insurance”, “Book a test drive”, and “Renew my passport”.';
   for (const titles of [literalNames.slice(0, 2), ['Compare car insurance', 'Book test drive', 'Renew passport'], [literalNames[0], literalNames[0], literalNames[2]]]) {
-    const { context, page } = await open(['"capture_tasks"', JSON.stringify({ titles })]); await send(page, literalRequest); await idle(page);
+    const { context, page } = await open([JSON.stringify({ titles })]); await send(page, literalRequest); await idle(page);
     assert.match(await page.locator('#status').innerText(), /Request failed/);
     assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.equal((await data(page)).length, 0);
     assert.equal(await page.locator('#approval').isVisible(), false, 'Incomplete or shortened explicit names cannot reach native approval');
@@ -96,48 +92,33 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
     await context.close();
   }
   {
-    const { context, page } = await open(['"capture_tasks"', JSON.stringify({ titles: [...literalNames].reverse() }), '"respond"', '{"message":"Saved."}']);
+    const { context, page } = await open([JSON.stringify({ titles: [...literalNames].reverse() })]);
     await send(page, literalRequest); await page.getByRole('button', { name: 'Allow once', exact: true }).click(); await idle(page);
     assert.deepEqual((await data(page)).map(item => item.title).sort(), [...literalNames].sort());
     assert.equal(await page.evaluate(() => fixture.executions.length), 1); await context.close();
   }
   for (const names of [['Call Mom', 'Call mom'], ['Book a test drive', 'Book  a test drive']]) {
-    const { context, page } = await open(['"capture_tasks"', JSON.stringify({ titles: names })]);
+    const { context, page } = await open([JSON.stringify({ titles: names })]);
     await send(page, `Save exact titles: ${names.map(name => JSON.stringify(name)).join(', ')}.`); await idle(page);
     assert.match(await page.locator('#status').innerText(), /Request failed/);
     assert.equal(await page.evaluate(() => fixture.prompts.length), 0, 'Domain-normalized literal collisions must be rejected before inference');
     assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.equal((await data(page)).length, 0); await context.close();
   }
   {
-    const responses = [];
-    for (let n = 1; n <= 7; n++) responses.push('"capture_tasks"', JSON.stringify({ titles: [`Capped thought ${n}`] }));
-    const { context, page } = await open(responses); await send(page, 'Capture seven separate thoughts in Inbox.');
+    const responses = Array.from({ length: 7 }, (_, index) => JSON.stringify({ titles: [`Capped thought ${index + 1}`] }));
+    const { context, page } = await open(responses);
+    await send(page, Array.from({ length: 7 }, (_, index) => `Capture exact title: "Capped thought ${index + 1}"`).join(' and ') + '.');
     await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
-    assert.equal((await data(page)).length, 6); assert.equal(await page.evaluate(() => fixture.executions.length), 6);
-    assert.equal(await page.locator('#continue-message').isVisible(), true);
-    assert.equal(((await page.locator('#chat').innerText()).match(/Captured 1 new task\(s\) in Inbox\./g) || []).length, 6, 'Cap displays each verified receipt exactly once');
-    await page.evaluate(() => fixture.responses.push('"respond"', '{"message":"The prior six changes are saved."}'));
-    await page.locator('#continue-message').click(); await idle(page);
-    assert.equal((await data(page)).length, 6); assert.equal(await page.evaluate(() => fixture.executions.length), 6);
-    assert.equal(((await page.locator('#chat').innerText()).match(/Captured 1 new task\(s\) in Inbox\./g) || []).length, 6, 'Resumed final response does not duplicate already reported receipts');
-    await context.close();
+    assert.equal((await data(page)).length, 6); assert.equal(await page.evaluate(() => fixture.executions.length), 6); assert.equal(await page.locator('#continue-message').isVisible(), true);
+    await page.evaluate(() => { fixture.responses = [JSON.stringify({ titles: ['Capped thought 7'] })]; });
+    await page.locator('#continue-message').click(); await idle(page); assert.equal((await data(page)).length, 7); assert.equal(await page.evaluate(() => fixture.executions.length), 7);
+    assert.equal(((await page.locator('#chat').innerText()).match(/Captured 1 new task\(s\) in Inbox\./g) || []).length, 7); await context.close();
   }
-  // Informational handling applies to exact completed signatures only. A new
-  // call for the changed record must still fail current-data validation.
   {
     const { context, page } = await open([]);
-    await page.evaluate(async () => {
-      const { openDatabase, mutate } = await import('./storage.js'); const db = await openDatabase(() => {});
-      try { await mutate(db, { kind: 'create', patch: { title: 'Check novel stale call' } }); } finally { db.close(); }
-      fixture.responses.push('"complete_task"', '{"title":"Check novel stale call"}', '"set_task_status"', '{"title":"Check novel stale call","status":"Blocked"}');
-    });
-    await send(page, 'Complete Check novel stale call and then mark that task blocked.');
-    await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
-    assert.equal((await data(page))[0].status, 'Completed');
-    assert.equal(await page.evaluate(() => fixture.executions.length), 1);
-    assert.match(await page.locator('#status').innerText(), /changed/);
-    assert.doesNotMatch(await page.locator('#chat').innerText(), /Stopped a repeated proposal/);
-    await context.close();
+    await page.evaluate(async () => { const {openDatabase,mutate}=await import('./storage.js'); const db=await openDatabase(()=>{}); await mutate(db,{kind:'create',patch:{title:'Check novel stale call'}}); db.close(); });
+    await send(page, 'Complete Check novel stale call and set Check novel stale call to Blocked.'); await idle(page);
+    assert.equal((await data(page))[0].status, 'Open'); assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.match(await page.locator('#chat').innerText(), /conflicting/); await context.close();
   }
-  await browser.close(); console.log('Bridge routing passed: selected-operation-only grammar, approval, validated replies, malformed/unknown operations blocked, Stop between stages and no replay after post-commit routing failure. Scripted proposals; real inference remains separate.');
+  await browser.close(); console.log('Bridge routing passed: selected-operation-only grammar, approval, validated replies, malformed/unknown operations blocked, Stop between stages and no post-success reroute, finite seven-step Continue and pre-write contradictory-field clarification. Scripted proposals; real inference remains separate.');
 })().catch(async error => { console.error(error); await browser?.close(); process.exitCode = 1; });

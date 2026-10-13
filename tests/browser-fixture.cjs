@@ -18,11 +18,23 @@ module.exports = function fixture(options = {}) {
     async clone() { f.clones++; return session(settings); },
     async prompt(input, settings) {
       let parsed = null;
-      for (const text of typeof input === 'string' ? [input] : input.map(message => message.content)) {
+      for (const text of typeof input === 'string' ? [input] : input.flatMap(message => typeof message.content === 'string' ? [message.content] : message.content.filter(part => part.type === 'text').map(part => part.value))) {
         if (typeof text !== 'string') continue;
         try { const candidate = JSON.parse(text); if (candidate && typeof candidate === 'object' && (candidate.stage || candidate.instructions)) { parsed = candidate; break; } } catch { /* The current request is ordinary text. */ }
       }
       f.prompts.push({ input: parsed, stage: parsed?.stage || null, responseConstraint: settings.responseConstraint, messages: input, userMessage: Array.isArray(input) ? input.at(-1).content : null, constrained: !!settings.responseConstraint });
+      // Finite host plans close successful writes without another route/reply
+      // inference. Older scenarios carry an optional acknowledgement in their
+      // scripted queue; discard only that unused prose at a fresh action stage.
+      if (f.unusedAcknowledgement && ['route', 'arguments'].includes(parsed?.stage)) {
+        const next = f.responses[0];
+        if (next && typeof next === 'object' && Object.hasOwn(next, 'tool') && next.tool === null) f.responses.shift();
+        f.unusedAcknowledgement = false;
+      }
+      if (parsed?.stage === 'native-step-feedback') {
+        const next = f.responses[0]; if (Array.isArray(next) && next.every(part => part.type === 'text')) f.responses.shift();
+        return [{ type: 'text', value: 'Acknowledged the settled operation.' }];
+      }
       if (canary) {
         f.canaryInProgress = true;
         if (f.options.canaryDelay) await new Promise(resolve => setTimeout(resolve, f.options.canaryDelay));
@@ -61,6 +73,7 @@ module.exports = function fixture(options = {}) {
       if (response.delay) { await new Promise(resolve => setTimeout(resolve, response.delay)); return JSON.stringify(response.envelope); }
       if (response.error) throw new Error(response.error);
       if (parsed?.stage === 'arguments' || parsed?.stage === 'respond') {
+        if (parsed.stage === 'arguments') f.unusedAcknowledgement = true;
         if (typeof response === 'string') return response;
         return JSON.stringify(parsed.stage === 'arguments' ? response.tool?.arguments || response.arguments || response : { message: response.message });
       }

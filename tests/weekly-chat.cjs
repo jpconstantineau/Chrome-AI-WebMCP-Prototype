@@ -13,7 +13,7 @@ async function command(page, name, args, text, choice = 'Allow once') {
   await page.evaluate(({ name, args }) => {
     fixture.responses.push(Object.assign(() => {
       const tools = fixture.options.nativeToolUse ? fixture.modelSettings.at(-1).tools : fixture.prompts.at(-1).input.tools;
-      if (args.destinationTitle) { args.parentId = tools.find(tool => tool.name === 'organize_tasks').inputSchema.properties.parentId.anyOf.find(branch => branch.enum).enum.find(value => value.includes(`: ${args.destinationTitle} (`)); delete args.destinationTitle; }
+      if (args.destinationTitle) { args.parentId = (tools.find(tool => tool.name === 'organize_tasks').inputSchema.properties.parentId.enum || tools.find(tool => tool.name === 'organize_tasks').inputSchema.properties.parentId.anyOf.find(branch => branch.enum).enum).find(value => value.includes(`: ${args.destinationTitle} (`)); delete args.destinationTitle; }
       return fixture.call(name, args);
     }, { route: name }));
     if (name !== 'weekly_review' || fixture.options.nativeToolUse) fixture.responses.push(fixture.answer('Unverified model acknowledgement.'));

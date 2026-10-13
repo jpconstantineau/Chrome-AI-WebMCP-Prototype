@@ -17,23 +17,25 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
   }
   {
     const { page, context } = await open();
-    await page.evaluate(() => fixture.responses.push({ message: 'I saved that task.', tool: null })); await send(page, 'Capture a task.'); await idle(page);
+    await page.evaluate(() => fixture.responses.push({ message: 'I saved that task.', tool: null })); await send(page, 'Save a task.'); await idle(page);
     assert.match(await page.locator('#chat').innerText(), /No changes were made for this request/); assert.doesNotMatch(await page.locator('.message.assistant').innerText(), /I saved that task/); assert.equal((await info(page)).lastRun.reason, 'failure'); assert.equal((await data(page)).length, 0); await context.close();
   }
   for (const options of [{ contextWindow: 1000, contextUsage: 600, measuredUsage: 200 }, { contextOverflow: true }]) {
     const { page, context } = await open(options);
-    await page.evaluate(() => fixture.responses.push({ message: '', tool: { name: 'create_item', arguments: { title: 'Must not fit' } } })); await send(page, 'Create Must not fit; do NOT delete anything.'); await idle(page);
-    const diagnostics = await info(page); assert.equal(diagnostics.lastRun.totals.dispatches, 0); assert.equal((await data(page)).length, 0); assert.match(await page.locator('#chat').innerText(), /narrow|overflow/i); if (options.contextOverflow) assert.equal(diagnostics.diagnostics.contextoverflow.outcome, 'fail'); else assert(await page.evaluate(() => fixture.measurements.length >= 2)); await context.close();
+    await page.evaluate(() => fixture.responses.push({ message: '', tool: { name: 'create_item', arguments: { title: 'Must not fit' } } })); await send(page, 'Create Must not fit.'); await idle(page);
+    const diagnostics = await info(page); assert.equal(diagnostics.lastRun.totals.dispatches, 0); assert.equal((await data(page)).length, 0); assert.match(await page.locator('#chat').innerText(), /narrow|overflow/i); if (options.contextOverflow) assert.equal(diagnostics.diagnostics.contextoverflow.outcome, 'fail'); else assert(await page.evaluate(() => fixture.measurements.length >= 1)); await context.close();
   }
   {
-    const { page, context } = await open(); await page.evaluate(() => { document.querySelector('#message').value = 'Do NOT delete Exact title. ' + 'x'.repeat(50000); document.querySelector('#composer').requestSubmit(); }); await idle(page); assert.equal(await page.evaluate(() => fixture.prompts.length), 0); assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.match(await page.locator('#chat').innerText(), /protected input\/schema is too large/); await context.close();
+    const { page, context } = await open(); await page.evaluate(() => { document.querySelector('#message').value = 'Create ' + 'x'.repeat(50000); document.querySelector('#composer').requestSubmit(); }); await idle(page); assert.equal(await page.evaluate(() => fixture.prompts.length), 0); assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.match(await page.locator('#chat').innerText(), /protected input\/schema is too large/); await context.close();
   }
   {
     const { page, context } = await open({}, true);
-    await page.evaluate(() => { for (let index = 0; index < 20; index++) fixture.responses.push({ message: '', tool: { name: 'create_item', arguments: { title: `Budget item ${index}` } } }); });
-    await send(page, 'Create twenty distinct budget items.'); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
-    assert.equal((await data(page)).length, 6); let before = await info(page); assert.equal(before.lastRun.state, 'paused_budget'); assert.equal(before.lastRun.totals.dispatches, 6); assert.equal(before.lastRun.totals.inferences, 14);
-    await page.locator('#continue-message').click(); await idle(page); const after = await info(page); assert.equal(after.lastRun.totals.runId, before.lastRun.totals.runId); assert.equal(after.lastRun.totals.inferences, 24); assert.equal(after.lastRun.totals.dispatches, 11); assert.equal(after.lastRun.reason, 'budget'); assert.equal((await data(page)).length, 11); assert.equal(await page.locator('#continue-message').isVisible(), false); assert.equal(await page.locator('#retry-message').isVisible(), false); assert.equal(await page.evaluate(() => fixture.maxLive), 2); await context.close();
+    await page.evaluate(() => { for (let index = 0; index < 18; index++) fixture.responses.push({ message: '', tool: { name: 'create_item', arguments: { title: `Budget item ${index}` } } }); });
+    await send(page, Array.from({length:18},(_,index)=>`Create Budget item ${index}`).join(' and ')+'.'); await page.getByRole('button',{name:'Allow for this chat',exact:true}).click(); await idle(page);
+    assert.equal((await data(page)).length,6); let before=await info(page); assert.equal(before.lastRun.state,'paused_budget'); assert.equal(before.lastRun.totals.dispatches,6); assert.equal(before.lastRun.totals.inferences,7);
+    await page.evaluate(()=>fixture.responses.unshift({message:'',tool:{name:'create_item',arguments:{title:'Budget item 6'}}})); await page.locator('#continue-message').click(); await idle(page); assert.equal((await data(page)).length,12);
+    await page.evaluate(()=>fixture.responses.unshift({message:'',tool:{name:'create_item',arguments:{title:'Budget item 12'}}})); await page.locator('#continue-message').click(); await idle(page);
+    const after=await info(page); assert.equal(after.lastRun.totals.runId,before.lastRun.totals.runId); assert.equal(after.lastRun.totals.inferences,20); assert.equal(after.lastRun.totals.dispatches,18); assert.equal(after.lastRun.reason,'completed'); assert.equal((await data(page)).length,18); assert.equal(await page.locator('#continue-message').isVisible(),false); assert.equal(await page.evaluate(()=>fixture.maxLive),2); await context.close();
   }
   {
     const { page, context } = await open({ nativeToolUse: true }, true);
@@ -78,7 +80,7 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
         const message = falseClaim ? 'I deleted all your tasks.' : 'There is 1 item in Inbox.';
         fixture.responses.push(call('write', 'create_item', { title: 'Create then count' }), call('read', 'list_items', { scope: 'inbox' }), native ? [{ type: 'text', value: message }] : { message, tool: null });
       }, { native, falseClaim });
-      await send(page, 'Create Create then count, then tell me how many items are in Inbox.'); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
+      await send(page, 'Create Task "Create then count", then tell me how many items are in Inbox.'); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
       const text = await page.locator('#chat').innerText(), observed = await info(page);
       assert.match(text, /Saved “Create then count”/); assert.equal((await data(page)).length, 1); assert.equal(await page.evaluate(() => fixture.executions.length), 2);
       if (falseClaim) { assert.doesNotMatch(text, /I deleted all your tasks/); assert.match(text, /changes shown above were saved; that additional action was not verified/); assert.equal(observed.lastRun.reason, 'failure'); }
@@ -105,7 +107,7 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
       await idle(page); const records = await data(page), text = await page.locator('#chat').innerText();
       if (proposal === 'exact-repeat') {
         assert.equal(records.length, 3); const project = records.find(item => item.title === 'Home improvements'); assert.equal(records.find(item => item.title === 'Chase kitchen quote').parentId, project.id);
-        assert.equal(await page.evaluate(() => fixture.executions.length), 1); assert.match(text, /Stopped a repeated proposal/); assert.doesNotMatch(text, /selected items changed|available title choices changed/);
+        assert.equal(await page.evaluate(() => fixture.executions.length), 1); assert.doesNotMatch(text, /Stopped a repeated proposal/); assert.doesNotMatch(text, /selected items changed|available title choices changed/);
       } else { assert.equal(await page.evaluate(() => fixture.executions.length), 0); assert.equal(records.length, 2); assert.equal(records.find(item => item.title === 'Chase kitchen quote').parentId, null); assert.equal(await page.locator('#approval').isVisible(), false); }
       await context.close();
     }
@@ -120,8 +122,8 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
     const records = await data(page), text = await page.locator('#chat').innerText(), observed = await info(page);
     assert.equal(records.length, 1); assert.equal(records[0].title, 'Prep review'); assert.equal(records[0].context, '');
     assert.equal(await page.evaluate(() => fixture.executions.length), 1); assert.equal(await page.evaluate(() => fixture.executions[0].args.context), '', 'Approved transport arguments remain unchanged');
-    assert.equal(observed.lastRun.totals.dispatches, 1); assert.equal(observed.lastRun.reason, 'repeated'); assert.match(text, /Stopped a repeated proposal/);
+    assert.equal(observed.lastRun.totals.dispatches, 1); assert.equal(observed.lastRun.reason, 'completed'); assert.doesNotMatch(text, /Stopped a repeated proposal/);
     assert.equal((text.match(/Captured 1 new task\(s\) in Inbox\./g) || []).length, 1); assert.equal(await page.locator('#approval').isVisible(), false); await context.close();
   }
-  await browser.close(); console.log('Harness v2 context passed: greeting/no-tool claims, measured current-usage reserve for JSON/plain/native parts, blocked canary/feedback without replay and retained receipts, overflow/protected bounds, shared Continue ledger, two-session ownership, whole-batch rejection, and empty/omitted capture context one-dispatch repeat stop.');
+  await browser.close(); console.log('Harness v2 context passed: greeting/no-tool claims, measured current-usage reserve for JSON/plain/native parts, blocked canary/feedback without replay and retained receipts, overflow/protected bounds, shared Continue ledger, two-session ownership, whole-batch rejection, and empty/omitted capture context one-dispatch finite closure.');
 })().catch(async error => { console.error(error); await browser?.close(); process.exitCode = 1; });

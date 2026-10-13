@@ -61,13 +61,13 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
     // An LLM repeated proposal must never create a second shopping entry.
     await page.evaluate(() => fixture.responses.push(fixture.call('add_shopping_item', { title: 'Apples' }), fixture.call('add_shopping_item', { title: 'Apples' })));
     await send(page, 'add apples to shopping list');
-    assert.match(await page.locator('#chat').innerText(), /Stopped a repeated proposal/);
+    assert.doesNotMatch(await page.locator('#chat').innerText(), /Stopped a repeated proposal/); await page.evaluate(() => { fixture.responses = []; });
     assert.doesNotMatch(await page.locator('#status').innerText(), /Request failed/);
     assert.equal(await page.evaluate(() => fixture.executions.filter(call => call.name === 'add_shopping_item' && call.args.title === 'Apples').length), 1);
     assert.equal(await page.locator('#retry-message').isVisible(), false);
     if (options.nativeToolUse) {
       await page.evaluate(() => fixture.responses.push([...fixture.call('create_item', { title: 'Denied item' }), ...fixture.call('create_item', { title: 'Queued item' })], fixture.call('create_item', { title: 'Retry after denial' })));
-      await page.locator('#message').fill('Add two permission-test items.'); await page.locator('#send').click();
+      await page.locator('#message').fill('Create Denied item and create Queued item.'); await page.locator('#send').click();
       await page.getByRole('button', { name: 'Deny', exact: true }).click(); await page.waitForFunction(() => !document.querySelector('#send').disabled);
       const errors = await page.evaluate(() => fixture.prompts.at(-1).messages[0].content.filter(part => part.type === 'tool-response').map(part => ({ name: part.value.name, id: part.value[fixture.options.idKey], message: part.value.errorMessage })));
       assert.equal(errors.length, 2); assert.notEqual(errors[0].id, errors[1].id); assert.match(errors[0].message, /permission denied/); assert.match(errors[1].message, /Skipped/);
@@ -78,7 +78,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
       fixture.responses.push(fixture.call('add_shopping_item', { title: 'Denied workflow purchase' }, 'Added before permission.'));
       if (fixture.options.nativeToolUse) fixture.responses.push(fixture.answer('Added despite denied permission.'));
     });
-    await page.locator('#message').fill('Add a permission-test purchase.'); await page.locator('#send').click();
+    await page.locator('#message').fill('Add a permission-test purchase to shopping list.'); await page.locator('#send').click();
     await page.getByRole('button', { name: 'Deny', exact: true }).click(); await page.waitForFunction(() => !document.querySelector('#send').disabled);
     const deniedChat = await page.locator('#chat').innerText();
     assert.equal(deniedChat.includes('Added before permission.'), false); assert.equal(deniedChat.includes('Added despite denied permission.'), false);
