@@ -17,7 +17,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
   for (const options of [{ legacyArguments: true }, { nativeToolUse: true, legacyArguments: true, idKey: 'callID' }, { nativeToolUse: true, idKey: 'callId' }]) {
     const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options);
     const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
+    await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     await page.evaluate(async () => {
       const { openDatabase, mutate } = await import('./storage.js'); const db = await openDatabase(() => {});
       const task = await mutate(db, { kind: 'create', patch: { title: 'Research for new car', description: 'Compare total cost and reliability', context: '@Home' } }); db.close(); fixture.research = task;

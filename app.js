@@ -1,5 +1,5 @@
 import { TYPES, STATUSES, EDITABLE, ATTRIBUTES, VIEWS, GROUP_TYPES, TOOLS, WORKFLOW_TOOLS, REVIEW_STEPS, validateItem, validateTool, validateUserAnswer, planWorkflow, planReview, descendants, filterItems, inInbox, fail } from './workspace.js';
-import { openDatabase, read, put, mutate, transitionReview, writeReview, snapshot } from './storage.js';
+import { openDatabase, read, put, savePreferences, mutate, transitionReview, writeReview, snapshot } from './storage.js';
 import { ASSISTANT_SYSTEM, supportsNativeToolUse, toolUseOptions, modelCatalog, parseNativeTurn, callSignature, modelResult, nativeResultPart, routeSchema, BRIDGE_REPLY_SCHEMA, parseRoute, parseBridgeArguments, parseBridgeReply, explicitCaptureTitles, explicitNewProjectTitle, ITEM_MUTATING_TOOLS, REVIEW_BOUNDARY_MESSAGE, afterItemMutation } from './harness.js';
 
 import { createHost } from './agent-host.js';
@@ -10,7 +10,7 @@ const host = createHost();
 let pendingHandoff = null;
 const OWN_INVOCATION = '__ownDispatchToken';
 const $ = id => document.getElementById(id);
-const state = { ready: false, db: null, session: null, setup: null, registrations: null, availability: 'unchecked', items: [], prefs: {}, history: [], review: null, selection: { view: 'inbox' }, filters: {}, screen: 'list', expanded: new Set(), draft: null, dirty: false, grant: false, approval: null, toolBusy: false, toolController: null, turn: null, generation: 0, startupGeneration: 0, activities: [], sw: 'Not registered', install: null, nativeToolUse: false, nativeReady: false, catalogProfile: 'standard', decoderProfile: 'chromium-compatibility', diagnostics: {}, usage: [], lastRun: null, unresolvedQuestion: null, pendingClarification: null, question: null, toolsReturn: null, composerFocus: false };
+const state = { ready: false, db: null, session: null, setup: null, registrations: null, availability: 'unchecked', items: [], prefs: {}, history: [], review: null, selection: { view: 'inbox' }, filters: {}, screen: 'list', expanded: new Set(), draft: null, dirty: false, grant: new Set(), approval: null, toolBusy: false, toolController: null, turn: null, generation: 0, startupGeneration: 0, activities: [], sw: 'Not registered', install: null, nativeToolUse: false, nativeReady: false, catalogProfile: 'standard', decoderProfile: 'chromium-compatibility', diagnostics: {}, usage: [], lastRun: null, unresolvedQuestion: null, pendingClarification: null, question: null, toolsReturn: null, composerFocus: false };
 const MODEL_OPTIONS = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
 const SYSTEM = ASSISTANT_SYSTEM;
 const RECEIPT_TOOLS = [...WORKFLOW_TOOLS, 'weekly_review'];
@@ -22,11 +22,10 @@ function run(fn) { return (...args) => Promise.resolve().then(() => fn(...args))
 function button(text, action, className = '') { const node = el('button', text, className); node.type = 'button'; node.addEventListener('click', run(action)); return node; }
 function panel(name) { document.body.dataset.panel = name; for (const node of document.querySelectorAll('.mobile-tabs button')) node.setAttribute('aria-pressed', String(node.dataset.panel === name)); }
 function setTheme(theme) { state.prefs.theme = theme === 'light' ? 'light' : 'dark'; document.body.classList.toggle('light', state.prefs.theme === 'light'); $('theme-button').textContent = state.prefs.theme === 'light' ? 'Dark theme' : 'Light theme'; }
-async function preferences() {
+async function preferences(permissionChange = null) {
   const value = { ...state.prefs, id: 'settings', selection: state.selection, expanded: [...state.expanded] };
-  await put(state.db, 'preferences', value);
-  state.prefs = value;
-  try { localStorage.setItem('chrome-ai-webmcp-preferences', JSON.stringify(value)); } catch { status('Saved in IndexedDB; local preference mirror unavailable.', true); }
+  state.prefs = await savePreferences(state.db, value, permissionChange);
+  try { localStorage.setItem('chrome-ai-webmcp-preferences', JSON.stringify(state.prefs)); } catch { status('Saved in IndexedDB; local preference mirror unavailable.', true); }
 }
 function currentItem() { return state.items.find(item => item.id === state.selection.itemId); }
 function isContainer(item) { return item.type !== 'Task' || state.items.some(child => child.parentId === item.id); }
@@ -202,7 +201,10 @@ async function checkStartup() {
     const availability = await LanguageModel.availability(MODEL_OPTIONS); if (generation !== state.startupGeneration) return; state.availability = availability; diagnostic('text-English-availability', availability === 'unavailable' ? 'fail' : 'pass', null, { availability, options: MODEL_OPTIONS });
     if (!['available', 'downloadable', 'downloading', 'unavailable'].includes(availability)) throw new Error(`Unknown model availability: ${availability}`);
     if (availability === 'unavailable') { startup('Local model unavailable', 'The browser reports this model is unavailable. Check browser, hardware and model requirements below.', [['Retry', checkStartup]]); $('setup-help').open = true; return; }
-    consent();
+    let returning = false;
+    try { returning = localStorage.getItem('chrome-ai-webmcp-opened') === 'yes' || !!JSON.parse(localStorage.getItem('chrome-ai-webmcp-preferences') || 'null')?.id; } catch { /* The saved data remains in IndexedDB. */ }
+    if (availability === 'available' && returning) await prepare(true);
+    else consent();
   } catch (error) { diagnostic('text-English-availability', 'fail', error); if (generation === state.startupGeneration) { startup('Model check failed', error.message, [['Retry', checkStartup]]); $('setup-help').open = true; } }
 }
 function consent(note = '') {
@@ -212,13 +214,15 @@ async function createSession(signal, monitor, catalog, native = false) {
   const session = await LanguageModel.create({ ...MODEL_OPTIONS, ...(native ? toolUseOptions(catalog?.tools || TOOLS, state.decoderProfile) : {}), signal, initialPrompts: [{ role: 'system', content: SYSTEM }], ...(monitor ? { monitor } : {}) });
   state.availability = 'available'; return session;
 }
-async function prepare() {
+async function prepare(automatic = false) {
+  automatic = automatic === true;
   const generation = ++state.startupGeneration, controller = new AbortController(); state.setup = controller;
-  startup('Preparing your local workspace', 'Preparing the local model…', [['Cancel', () => { ++state.startupGeneration; cleanupSetup(); consent('Preparation cancelled. Chrome-managed downloads may continue.'); }]]);
+  const downloading = state.availability !== 'available';
+  startup(automatic ? 'Opening your saved workspace' : 'Preparing your local workspace', downloading ? 'Preparing the local model download…' : 'Connecting the installed local model…', [['Cancel', () => { ++state.startupGeneration; cleanupSetup(); consent('Preparation cancelled. Chrome-managed downloads may continue.'); }]]);
   let stage = 'Model preparation', session, db;
   try {
     // The create call runs synchronously from the approval gesture, before any await.
-    session = await createSession(controller.signal, monitor => monitor.addEventListener('downloadprogress', event => { if (generation !== state.startupGeneration) return; const loaded = event.loaded; $('download-progress').hidden = false; if (!Number.isFinite(loaded) || loaded < 0 || loaded > 1) { $('download-progress').removeAttribute('value'); $('startup-body').textContent = 'Downloading/preparing AI; progress unavailable…'; } else { $('download-progress').value = loaded; $('startup-body').textContent = loaded === 1 ? 'Download reported complete; preparing AI…' : `Model download: ${Math.round(loaded * 100)}%`; } diagnostic('download-progress', Number.isFinite(loaded) && loaded >= 0 && loaded <= 1 ? 'pass' : 'unknown', null, { loaded: Number.isFinite(loaded) ? loaded : null }); }));
+    session = await createSession(controller.signal, downloading ? monitor => monitor.addEventListener('downloadprogress', event => { if (generation !== state.startupGeneration) return; const loaded = event.loaded; $('download-progress').hidden = false; if (!Number.isFinite(loaded) || loaded < 0 || loaded > 1) { $('download-progress').removeAttribute('value'); $('startup-body').textContent = 'Downloading/preparing AI; progress unavailable…'; } else { $('download-progress').value = loaded; $('startup-body').textContent = loaded === 1 ? 'Download reported complete; preparing AI…' : `Model download: ${Math.round(loaded * 100)}%`; } diagnostic('download-progress', Number.isFinite(loaded) && loaded >= 0 && loaded <= 1 ? 'pass' : 'unknown', null, { loaded: Number.isFinite(loaded) ? loaded : null }); }) : undefined);
     if (generation !== state.startupGeneration || controller.signal.aborted) { session?.destroy(); return; }
     if (typeof session?.prompt !== 'function') throw new Error('The created session has no prompt method.');
     diagnostic('text-creation', 'pass'); state.session = session; stage = 'Persistent storage'; $('startup-body').textContent = 'Opening saved local workspace…';
@@ -240,12 +244,13 @@ async function prepare() {
     const own = await discover(); if (own.length !== TOOLS.length) throw new Error('Not all registered own-page tools were discoverable.');
     if (generation !== state.startupGeneration) return;
     diagnostic('registration-discovery', 'pass', null, { count: own.length }); state.ready = true; state.screen = 'list'; $('startup').hidden = true; $('workspace').hidden = false; chatControls(false); renderNavigation(); renderContent(); renderHistory(); renderReviewCard(); status('Ready · Local model, native tools and IndexedDB.');
-  } catch (error) { if (generation === state.startupGeneration) diagnostic(stage, 'fail', error); session?.destroy(); db?.close(); if (generation === state.startupGeneration) { cleanupSetup(); startup(`${stage} failed`, error.message || String(error), [['Retry', checkStartup]]); $('setup-help').open = true; } }
+    try { localStorage.setItem('chrome-ai-webmcp-opened', 'yes'); } catch { /* An unavailable hint never affects saved records or tool permissions. */ }
+  } catch (error) { if (generation === state.startupGeneration) diagnostic(stage, 'fail', error); session?.destroy(); db?.close(); if (generation === state.startupGeneration) { cleanupSetup(); if (automatic && stage === 'Model preparation' && error.name === 'NotAllowedError') consent('Chrome needs a click to reconnect the installed model. Your saved workspace is retained.'); else { startup(`${stage} failed`, error.message || String(error), [['Retry', checkStartup]]); $('setup-help').open = true; } } }
 }
 async function discover() { const tools = await document.modelContext.getTools(); return tools.filter(tool => TOOLS.some(own => own.name === tool.name) && tool.origin === location.origin && tool.window === window); }
 
 function cancelApproval() { state.approval?.finish('cancel'); }
-function clearQuestion() { state.question?.cancel(); const box = $('user-question'); box.hidden = true; box.replaceChildren(); }
+function clearQuestion() { state.question?.cancel(); state.clarificationCleanup?.(); state.clarificationCleanup = null; const box = $('user-question'); box.hidden = true; box.replaceChildren(); }
 function questionCard(args, submit, cancel) {
   clearQuestion(); const box = $('user-question'); box.className = 'user-question'; box.hidden = false;
   box.replaceChildren(el('h3', args.question)); const actions = el('div', undefined, 'actions');
@@ -257,7 +262,10 @@ function questionCard(args, submit, cancel) {
 }
 function showClarification(plan) {
   const options = plan.options || (plan.pending?.destinations ? [...plan.pending.destinations.map(item => item.title), 'Inbox'] : []);
-  questionCard({ question: plan.question, options }, async answer => { if (state.turn) return; clearQuestion(); await chat(answer); }, () => { state.pendingClarification = null; clearQuestion(); $('message').focus(); });
+  const cancel = () => { state.pendingClarification = null; clearQuestion(); $('message').focus(); };
+  questionCard({ question: plan.question, options }, async answer => { if (state.turn) return; clearQuestion(); await chat(answer); }, cancel);
+  const escape = event => { if (event.key === 'Escape') { event.preventDefault(); cancel(); } };
+  document.addEventListener('keydown', escape); state.clarificationCleanup = () => document.removeEventListener('keydown', escape);
 }
 function askUser(args, signal) {
   if (signal.aborted) return Promise.reject(Object.assign(new Error('Question cancelled.'), { code: 'cancelled' }));
@@ -332,13 +340,13 @@ async function executeCallback(name, args, nativeSignal) {
       const savedPermissions = await read(state.db, 'preferences', 'settings');
       state.prefs.allowedTools = Array.isArray(savedPermissions?.allowedTools) ? savedPermissions.allowedTools.filter(toolName => TOOLS.some(tool => tool.name === toolName)) : [];
       const usedRememberedPermission = !captured?.canary && state.prefs.allowedTools.includes(name);
-      if (captured?.canary || (!state.prefs.allowedTools?.includes(name) && (!state.grant || (name === 'weekly_review' && ['complete_step', 'skip_step'].includes(args.action))))) {
+      if (captured?.canary || (!state.prefs.allowedTools?.includes(name) && (!state.grant.has(name) || (name === 'weekly_review' && ['complete_step', 'skip_step'].includes(args.action))))) {
         record.heading.textContent = `${name} · awaiting permission`;
-        const permissionChoice = await permission('Allow the agent to use this tool?', { tool: name, purpose: TOOLS.find(tool => tool.name === name).description, arguments: args, ...(workflow || reviewPlan ? { effect: (workflow || reviewPlan).effect } : name === 'update_item' && Object.hasOwn(args.patch, 'context') ? { effect: { title: target.title, context: { before: target.context, after: args.patch.context } } } : {}), ...(captured?.canary ? {} : { remember: `Always allow remembers ${name} for this browser. Other tools still ask. Deletion always needs confirmation.` }) }, captured?.canary ? [['once', 'Allow once', 'primary'], ['deny', 'Deny']] : [['once', 'Allow once', 'primary'], ['always', `Always allow ${name}`], ['chat', 'Allow for this chat'], ['deny', 'Deny']], signal);
+        const permissionChoice = await permission('Allow the agent to use this tool?', { tool: name, purpose: TOOLS.find(tool => tool.name === name).description, arguments: args, ...(workflow || reviewPlan ? { effect: (workflow || reviewPlan).effect } : name === 'update_item' && Object.hasOwn(args.patch, 'context') ? { effect: { title: target.title, context: { before: target.context, after: args.patch.context } } } : {}), ...(captured?.canary ? {} : { remember: `Always allow remembers ${name} for this browser. Other tools still ask. Allow for this chat also applies only to this tool. Deletion always needs confirmation.` }) }, captured?.canary ? [['once', 'Allow once', 'primary'], ['deny', 'Deny']] : [['once', 'Allow once', 'primary'], ['always', `Always allow ${name}`], ['chat', 'Allow for this chat'], ['deny', 'Deny']], signal);
         if (permissionChoice === 'deny') fail('Tool permission denied.', 'denied');
         if (permissionChoice === 'cancel') fail('Tool permission cancelled.', 'cancelled');
-        if (permissionChoice === 'chat') state.grant = true;
-        if (permissionChoice === 'always') { const previous = state.prefs.allowedTools || []; state.prefs.allowedTools = [...new Set([...previous, name])]; try { await preferences(); channel?.postMessage('permissions'); } catch (error) { state.prefs.allowedTools = previous; throw error; } }
+        if (permissionChoice === 'chat') state.grant.add(name);
+        if (permissionChoice === 'always') { const previous = state.prefs.allowedTools || []; state.prefs.allowedTools = [...new Set([...previous, name])]; try { await preferences({ allow: name }); channel?.postMessage('permissions'); } catch (error) { state.prefs.allowedTools = previous; throw error; } }
       }
       if (subtree) {
         record.heading.textContent = `${name} · awaiting deletion confirmation`;
@@ -720,10 +728,10 @@ async function requestReviewer() {
   await chat(text, null, text, { reviewer: request });
 }
 async function newChat() {
-  if (await modal('Start a new chat?', 'This clears stored conversation and revokes tool permission. Lists and weekly review remain saved.', [['reset', 'Start new chat', 'primary'], ['cancel', 'Cancel']]) !== 'reset') return;
-  stop(); state.grant = false; state.session?.destroy(); state.session = null; chatControls(false);
+  if (await modal('Start a new chat?', 'This clears stored conversation and permissions granted for this chat. Lists, weekly review and Always allow choices remain saved.', [['reset', 'Start new chat', 'primary'], ['cancel', 'Cancel']]) !== 'reset') return;
+  stop(); state.grant.clear(); state.session?.destroy(); state.session = null; chatControls(false);
   let replacement;
-  try { replacement = await createSession(); await put(state.db, 'history', null, true); state.session = replacement; state.history = []; state.unresolvedQuestion = null; state.pendingClarification = null; state.activities = []; state.continuation = null; renderHistory(); chatControls(false); status('New local chat ready. Tool permission revoked.'); }
+  try { replacement = await createSession(); await put(state.db, 'history', null, true); state.session = replacement; state.history = []; state.unresolvedQuestion = null; state.pendingClarification = null; state.activities = []; state.continuation = null; renderHistory(); chatControls(false); status('New local chat ready. Chat permissions cleared; Always allow choices retained.'); }
   catch (error) { replacement?.destroy(); status(`Chat reset failed: ${error.message}. Use Retry model.`, true); $('chat').append(button('Retry model', async () => { state.session = await createSession(); chatControls(false); })); }
 }
 
@@ -774,9 +782,9 @@ async function renderTools() {
   const main = $('content'); main.replaceChildren(el('p', 'What is actually available', 'eyebrow'), el('h1', 'Tools & diagnostics'));
   main.append(button('Back to workspace', closeTools, 'primary'));
   const busy = !!state.turn || !!state.continuation;
-  main.append(el('pre', JSON.stringify({ nativeInterface: 'document.modelContext', modelAvailability: state.availability, modelSession: state.session ? 'Ready' : 'Unavailable', modelToolLoop: state.nativeToolUse ? 'Native Prompt API tool calls' : 'Constrained JSON bridge', nativeToolUse: supportsNativeToolUse() ? 'Typed interfaces present; canary required' : 'unsupported: typed interfaces absent', nativeCanaryReady: state.nativeReady, catalogProfile: state.catalogProfile, decoderProfile: state.decoderProfile, nativeProposalFailure: state.nativeProposalFailure || null, storage: state.db ? 'IndexedDB v2 open' : 'Closed', serviceWorker: state.sw, online: navigator.onLine, installed: matchMedia('(display-mode: standalone)').matches, toolPermission: state.grant ? 'Allowed for this chat' : 'Ask on use', runtimeNotes: state.prefs.runtimeNotes || 'unknown', contextUsage: state.usage.at(-1) || 'unknown', diagnostics: state.diagnostics, lastRun: state.lastRun ? { state: state.lastRun.state, reason: state.lastRun.reason, totals: state.lastRun.reducer, activeMs: host.activeMs(state.lastRun) } : null }, null, 2)));
+  main.append(el('pre', JSON.stringify({ nativeInterface: 'document.modelContext', modelAvailability: state.availability, modelSession: state.session ? 'Ready' : 'Unavailable', modelToolLoop: state.nativeToolUse ? 'Native Prompt API tool calls' : 'Constrained JSON bridge', nativeToolUse: supportsNativeToolUse() ? 'Typed interfaces present; canary required' : 'unsupported: typed interfaces absent', nativeCanaryReady: state.nativeReady, catalogProfile: state.catalogProfile, decoderProfile: state.decoderProfile, nativeProposalFailure: state.nativeProposalFailure || null, storage: state.db ? 'IndexedDB v2 open' : 'Closed', serviceWorker: state.sw, online: navigator.onLine, installed: matchMedia('(display-mode: standalone)').matches, toolPermission: { chatTools: [...state.grant], rememberedTools: state.prefs.allowedTools || [], otherTools: 'Ask on use' }, runtimeNotes: state.prefs.runtimeNotes || 'unknown', contextUsage: state.usage.at(-1) || 'unknown', diagnostics: state.diagnostics, lastRun: state.lastRun ? { state: state.lastRun.state, reason: state.lastRun.reason, totals: state.lastRun.reducer, activeMs: host.activeMs(state.lastRun) } : null }, null, 2)));
   const actions = el('div', undefined, 'actions');
-  actions.append(button('Revoke permission', () => { state.grant = false; state.toolController?.abort(); cancelApproval(); status('Tool permission revoked. Committed changes remain saved.'); renderTools(); }), button('Reset chat', newChat));
+  actions.append(button('Revoke permission', () => { state.grant.clear(); state.toolController?.abort(); cancelApproval(); status('Tool permission revoked. Committed changes remain saved.'); renderTools(); }), button('Reset chat', newChat));
   if (state.prefs.allowedTools?.length) {
     const remembered = el('div'); remembered.append(el('h2', 'Remembered tool permissions'), el('p', 'These tools are allowed in this browser until you revoke them. Other tools ask on use. Deletion still requires confirmation.', 'muted'));
     for (const name of state.prefs.allowedTools) remembered.append(button(`Revoke ${name}`, () => revokeRemembered(name)));
@@ -793,7 +801,7 @@ async function renderTools() {
   const notes = el('textarea'); notes.maxLength = 1000; main.append(field('Optional manual channel / build / flags / model notes', 'runtime-notes', notes, state.prefs.runtimeNotes || '')); main.append(button('Save runtime notes', async () => { state.prefs.runtimeNotes = notes.value; await preferences(); status('Runtime notes saved locally.'); }));
   try { const tools = await discover(); if (state.screen !== 'tools') return; main.append(el('p', `${tools.length} native own-page tools discovered.`, 'meta')); for (const tool of tools) { const box = el('div', undefined, 'tool'); box.append(el('h2', tool.name), el('p', tool.description, 'muted'), el('p', tool.annotations?.consequentialHint ? 'Destructive · always confirm' : tool.annotations?.readOnlyHint ? 'Read only' : 'Changes local app state', 'meta')); const details = el('details'); details.append(el('summary', 'Input schema and annotations'), el('pre', JSON.stringify({ inputSchema: tool.inputSchema, annotations: tool.annotations }, null, 2))); box.append(details); main.append(box); } } catch (error) { main.append(el('p', `Native discovery failed: ${error.message}`, 'error')); }
 }
-async function revokeRemembered(name) { state.prefs.allowedTools = name ? state.prefs.allowedTools.filter(tool => tool !== name) : []; state.grant = false; state.toolController?.abort(); cancelApproval(); await preferences(); channel?.postMessage('permissions'); status(name ? `Permission revoked for ${name}.` : 'Remembered tool permissions revoked.'); if (state.screen === 'tools') await renderTools(); }
+async function revokeRemembered(name) { state.prefs.allowedTools = name ? state.prefs.allowedTools.filter(tool => tool !== name) : []; state.grant.clear(); state.toolController?.abort(); cancelApproval(); await preferences({ revoke: name }); channel?.postMessage('permissions'); status(name ? `Permission revoked for ${name}.` : 'Remembered tool permissions revoked.'); if (state.screen === 'tools') await renderTools(); }
 async function closeTools() { const previous = state.toolsReturn || { selection: state.selection, filters: state.filters, screen: 'list' }; await navigate(previous.selection, previous.filters, previous.screen); }
 async function toggleTools() { if (state.screen === 'tools') return closeTools(); const previous = { selection: { ...state.selection }, filters: { ...state.filters }, screen: state.screen }; if (await navigate(state.selection, state.filters, 'tools')) state.toolsReturn = previous; }
 
@@ -808,7 +816,7 @@ $('continue-message').addEventListener('click', run(() => chat(state.lastRequest
 for (const node of document.querySelectorAll('.mobile-tabs button')) node.addEventListener('click', () => panel(node.dataset.panel));
 window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('online', () => status('Online.')); window.addEventListener('offline', () => status('Offline · local data stays here; the model must already be available.'));
-channel?.addEventListener('message', run(async event => { if (!state.ready) return; if (event.data === 'permissions') { const saved = await read(state.db, 'preferences', 'settings'); state.prefs.allowedTools = Array.isArray(saved?.allowedTools) ? saved.allowedTools.filter(name => TOOLS.some(tool => tool.name === name)) : []; state.grant = false; state.toolController?.abort(); cancelApproval(); if (state.screen === 'tools') await renderTools(); return; } if (state.dirty) { status('Another tab changed items. Your draft is kept; save will check for conflicts.', true); state.items = await read(state.db, 'items'); renderNavigation(); } else { state.draft = null; await refresh(); } }));
+channel?.addEventListener('message', run(async event => { if (!state.ready) return; if (event.data === 'permissions') { const saved = await read(state.db, 'preferences', 'settings'); state.prefs.allowedTools = Array.isArray(saved?.allowedTools) ? saved.allowedTools.filter(name => TOOLS.some(tool => tool.name === name)) : []; state.grant.clear(); state.toolController?.abort(); cancelApproval(); if (state.screen === 'tools') await renderTools(); return; } if (state.dirty) { status('Another tab changed items. Your draft is kept; save will check for conflicts.', true); state.items = await read(state.db, 'items'); renderNavigation(); } else { state.draft = null; await refresh(); } }));
 window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); state.install = event; $('install-button').hidden = false; });
 $('install-button').addEventListener('click', run(async () => { if (!state.install) return; await state.install.prompt(); await state.install.userChoice; state.install = null; $('install-button').hidden = true; }));
 if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('./service-worker.js').then(async registration => { await navigator.serviceWorker.ready; state.sw = registration.active ? 'Active shell cache' : 'Registered; not active yet'; }).catch(error => { state.sw = `Unavailable: ${error.message}`; if (state.ready) status(`Offline shell unavailable: ${error.message}`, true); });

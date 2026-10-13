@@ -9,7 +9,7 @@ async function open() {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await context.addInitScript(fixture, { nativeToolUse: true, legacyArguments: true });
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await require('./startup-ui.cjs')(page);
   await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(() => {
     let serial = 0;
@@ -18,7 +18,7 @@ async function open() {
   return { context, page };
 }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function data(page) {
   return page.evaluate(async () => {
     const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {});
@@ -114,7 +114,7 @@ async function noFallback(page, expectedCreates) {
     const prompts = await page.evaluate(() => fixture.prompts.length);
     await page.evaluate(() => { fixture.options.createError = false; });
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page, { resetTrace: false });
+    await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page, { resetTrace: false });
     assert.equal(await page.evaluate(() => fixture.prompts.length), prompts, 'Preparation must not replay the failed request');
     assert.equal(await page.evaluate(() => fixture.tools.size), 17);
     assert.deepEqual((await data(page)).map(item => item.title), ['Saved before model failure']);

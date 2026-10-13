@@ -1,5 +1,7 @@
 # Usability and conversation improvements
 
+The follow-up [thirteen-item audit](thirteen-item-audit.md) records the latest corrections and verification. Earlier release evidence below remains historical.
+
 Implemented the maintainer's thirteen follow-up requests without a build, runtime dependency, backend or storage-version change.
 
 ## Changes
@@ -12,8 +14,8 @@ Implemented the maintainer's thirteen follow-up requests without a build, runtim
 | Add a task to a named container | Creates only the supplied Task title under the unique existing container, matching its name without requiring the same case. No fallback to Inbox or shopping; missing/duplicate/stale containers clarify before effects. Parent references remain readable to the model. |
 | Leave Tools | Back to workspace and the Tools toggle restore the prior screen, selection and filters. Unsaved-draft checks remain. |
 | Sidebar order | Inbox, All items, Projects, Roles, Areas, Shopping lists, Someday/Maybe, Checklists. |
-| Remember a specific tool | Always allow tool_name saves that name in IndexedDB preferences. Other tools ask independently; chat-wide grants remain a separate existing choice. Reload and New chat preserve remembered choices. Tools revokes individual or all remembered grants. Every deletion still requires confirmation. |
-| Reopening storage | IndexedDB already created stores only inside onupgradeneeded. Startup now says it opens saved data, reports created/upgraded/opened-existing separately, and retains schema v2. Each document still needs its own model session and WebMCP registrations. |
+| Remember a specific tool | Always allow tool_name saves that name in IndexedDB preferences. Other tools ask independently; Allow for this chat is now restricted to the selected tool. Unrelated preference writes cannot resurrect revoked grants. Reload and New chat preserve remembered choices. Tools revokes individual or all remembered grants. Every deletion still requires confirmation. |
+| Reopening storage | IndexedDB already created stores only inside onupgradeneeded. Returning visits automatically reconnect the available model and open saved data, reporting created/upgraded/opened-existing separately and retaining schema v2. Each document still needs its own model session and WebMCP registrations. |
 | Chrome setup instructions | Startup includes the WebMCP testing flag, version-dependent Prompt API guidance, model/hardware/policy checks and optional native tool-use guidance. Missing APIs or setup failures open these instructions. Chrome exposes capabilities, not its flag settings. |
 | Composer focus | The input regains focus after a chat turn, including tool permission completion and Stop. A visible question keeps focus in its own answer input. |
 | Question tool | ask_user exposes a brief question, 2–8 distinct options, and custom text. Visible buttons and a normal text field return the selected/typed answer to the model. Stop, Escape and Cancel question end the wait. Host-generated clarification also offers answer buttons when grounded choices exist. |

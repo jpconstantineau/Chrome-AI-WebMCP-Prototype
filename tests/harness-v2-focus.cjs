@@ -6,7 +6,7 @@ let browser;
 async function open(native, completionGrant = false) {
   const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, native ? { nativeToolUse: true } : {});
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
+  await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(async completionGrant => {
     const { openDatabase, mutate, read } = await import('./storage.js'); const db = await openDatabase(() => {});
     const car = await mutate(db, { kind: 'create', patch: { title: 'Choose a new car', type: 'Project' } });
@@ -20,7 +20,7 @@ async function open(native, completionGrant = false) {
   await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await page.evaluate(() => external);
   await page.evaluate(() => { fixture.executions = []; fixture.prompts = []; fixture.responses = []; }); return { context, page };
 }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); await idle(page); }
 async function records(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return await read(db, 'items'); } finally { db.close(); } }); }
 async function info(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
@@ -43,7 +43,7 @@ async function info(page) { if (await page.getByRole('heading', { name: 'Tools &
         if (scenario === 'literal-capture-attack' || scenario === 'capture-compound') fixture.responses.push(call('capture', 'capture_tasks', { titles: ['Send workshop notes to attendees'] }), call('complete', 'complete_task', { title: 'Renew my passport' }), scenario === 'literal-capture-attack' ? call('sentinel', 'create_item', { title: 'Must not execute after blocked completion' }) : final);
       }, { native, scenario });
       await send(page, { 'unrelated-followup': 'Move Renew my passport from Choose a new car to existing Home improvements.', compound: 'Complete Renew my passport and set Chase kitchen quote to Waiting For.', broad: 'Move all remaining tasks, including Renew my passport, to Home improvements.', duplicate: 'Complete Renew my passport.', 'literal-capture-attack': 'From my past calendar, I need a follow-up. Capture this exact title: "Send workshop notes to attendees".', 'capture-compound': 'Capture this exact title: "Send workshop notes to attendees" and complete Renew my passport.' }[scenario]);
-      const actual = await records(page), observed = await info(page); assert.equal(observed.toolPermission, 'Allowed for this chat'); assert.equal(await page.locator('#approval').isVisible(), false);
+      const actual = await records(page), observed = await info(page); assert(observed.toolPermission.chatTools.length > 0); assert.equal(observed.toolPermission.otherTools, 'Ask on use'); assert.equal(await page.locator('#approval').isVisible(), false);
       const titles = await page.evaluate(({ native, scenario }) => {
         if (scenario === 'duplicate') return [];
         if (scenario === 'literal-capture-attack') return (native ? fixture.modelSettings.find(settings => settings.tools?.some(tool => tool.name === 'capture_tasks')).tools : fixture.prompts.find(prompt => prompt.stage === 'arguments').input.tools).map(tool => tool.name);

@@ -58,3 +58,14 @@ assert.deepEqual(catalog.tools.map(tool => tool.name), ['ask_user', 'update_item
 assert.deepEqual(catalog.resolve({ name: 'ask_user', arguments: args }).arguments, args);
 assert.throws(() => catalog.resolve({ name: 'complete_task', arguments: { title: task.title } }));
 console.log('Conversation domain passed: exact Area/container creation, grounded child Tasks, parent staleness/ambiguity, shopping separation and bounded custom-answer question tools.');
+
+for (const [destination, type] of [['Projects', 'Project'], ['Roles', 'Role'], ['Checklists', 'Checklist'], ['Areas', 'Area of Responsibility']]) {
+  const plan = analyzeRequest(`add Exact new title to ${destination}`, []);
+  assert.deepEqual(plan.steps[0].creation, { title: 'Exact new title', type, status: 'Open', parentId: null });
+}
+
+for (const destination of ['Projects', 'Roles', 'Checklists', 'Areas']) {
+  const parent = { ...area, title: destination };
+  const plan = analyzeRequest(`add "Schedule inspection" under "${destination}"`, [parent]);
+  assert.deepEqual(plan.steps[0].creation, { title: 'Schedule inspection', type: 'Task', status: 'Open', parentId: parent.id });
+}

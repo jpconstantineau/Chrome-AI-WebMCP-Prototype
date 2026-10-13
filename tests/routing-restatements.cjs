@@ -3,7 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const fixture = require('./browser-fixture.cjs');
 const configure = require('./harness-ui.cjs');
 let browser;
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function facts(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); const items = await read(db, 'items'); db.close(); return items; }); }
 async function command(page, native, text, calls) {
   await page.evaluate(({ native, calls }) => { fixture.responses = calls.map(({ name, args }) => native ? [{ type: 'tool-call', value: new LanguageModelToolCall({ callId: crypto.randomUUID(), name, arguments: args }) }] : { message: '', tool: { name, arguments: args } }); if (native) fixture.responses.push([{ type: 'text', value: 'Acknowledged.' }]); fixture.prompts = []; fixture.executions = []; }, { native, calls });
@@ -13,7 +13,7 @@ async function command(page, native, text, calls) {
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   for (const native of [false, true]) {
-    const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, { nativeToolUse: native }); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
+    const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, { nativeToolUse: native }); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
     await page.evaluate(async () => { const { openDatabase, mutate, read } = await import('./storage.js'); const db = await openDatabase(() => {}); for (const title of ['Chase kitchen quote', 'Call the roofer', 'Renew my passport', 'Inspect new Project named Car']) await mutate(db, { kind: 'create', patch: { title, context: '@Initial' } }); for (const title of ['Choose a new car', 'Start a new studio', 'Build a new Project named Car']) await mutate(db, { kind: 'create', patch: { title, type: 'Project' } }); fixture.seed = await read(db, 'items'); db.close(); window.grant = document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(tool => tool.name === 'list_attributes'), {})); }); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await page.evaluate(() => grant);
     for (const title of ['Chase kitchen quote', 'Call the roofer']) {
       for (const repeat of [false, true]) {

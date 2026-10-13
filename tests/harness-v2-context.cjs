@@ -3,8 +3,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const fixture = require('./browser-fixture.cjs');
 const configureHarness = require('./harness-ui.cjs');
 let browser;
-async function open(options = {}, full = false) { const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); if (full) await configureHarness(page); return { context, page }; }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function open(options = {}, full = false) { const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765'); await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); if (full) await configureHarness(page); return { context, page }; }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); }
 async function info(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
 async function data(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return await read(db, 'items'); } finally { db.close(); } }); }

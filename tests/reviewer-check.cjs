@@ -10,7 +10,7 @@ async function items(page) { return page.evaluate(async () => { const { openData
 async function external(page, name, args) { await page.evaluate(({name,args}) => { window.reviewResult = document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(tool => tool.name === name), args)).then(JSON.parse); }, {name,args}); }
 async function result(page) { return page.evaluate(() => window.reviewResult); }
 async function mutate(page, action) { return page.evaluate(async action => { const {openDatabase,mutate}=await import('./storage.js'); const db=await openDatabase(()=>{}); try {return await mutate(db,action);} finally {db.close();} },action); }
-async function ready(page) { await page.getByRole('button',{name:'Continue',exact:true}).click(); await page.locator('#workspace').waitFor({state:'visible'}); await configureHarness(page); }
+async function ready(page) { await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({state:'visible'}); await configureHarness(page); }
 (async () => {
   browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL || 'chrome',headless:true});
   const nativeCtx=await browser.newContext({serviceWorkers:'block'});const nativePage=await nativeCtx.newPage();await nativePage.goto(URL);
@@ -21,7 +21,7 @@ async function ready(page) { await page.getByRole('button',{name:'Continue',exac
   // A blocked v1 upgrade reports an actionable failure and recovers after the old tab closes.
   const blockedCtx=await browser.newContext({serviceWorkers:'block'});await blockedCtx.addInitScript(fixture);const blocked=await blockedCtx.newPage();await blocked.goto(URL);
   await blocked.evaluate(()=>new Promise(resolve=>{const r=indexedDB.open('chrome-ai-webmcp-prototype',1);r.onupgradeneeded=()=>{r.result.createObjectStore('preferences',{keyPath:'id'});r.result.createObjectStore('history',{keyPath:'id',autoIncrement:true});};r.onsuccess=()=>{window.heldDatabase=r.result;resolve();};}));
-  await blocked.getByRole('button',{name:'Continue',exact:true}).click();await blocked.getByText('Persistent storage failed',{exact:true}).waitFor();assert.match(await blocked.locator('#startup-body').innerText(),/Close other tabs/);
+  await blocked.getByRole('button', { name: 'Continue', exact: true }).click();await blocked.getByText('Persistent storage failed',{exact:true}).waitFor();assert.match(await blocked.locator('#startup-body').innerText(),/Close other tabs/);
   await blocked.evaluate(()=>heldDatabase.close());await blocked.getByRole('button',{name:'Retry',exact:true}).click();await ready(blocked);assert.equal(await blocked.evaluate(()=>fixture.tools.size),17);await blockedCtx.close();
   const ctx=await browser.newContext({viewport:{width:1440,height:960},serviceWorkers:'block'});
   await ctx.addInitScript(fixture);
@@ -58,7 +58,7 @@ async function ready(page) { await page.getByRole('button',{name:'Continue',exac
   await external(page,'create_item',{title:'Destination changed',parentId:parent.id});await page.getByRole('button',{name:'Allow once',exact:true}).waitFor();
   await mutate(page,{kind:'update',id:parent.id,patch:{title:'Changed project'}});await page.getByRole('button',{name:'Allow once',exact:true}).click();assert.equal((await result(page)).error.code,'stale');assert.equal((await items(page)).length,2);
   await external(page,'list_items',{parentId:null});await page.getByRole('button',{name:'Allow for this chat'}).click();assert.equal((await result(page)).data.total,2);
-  await external(page,'read_attribute',{id:target.id,attribute:'title'});assert.equal((await result(page)).data.value,'Concurrent title');
+  await external(page,'read_attribute',{id:target.id,attribute:'title'});await page.getByRole('button',{name:'Allow once',exact:true}).click();assert.equal((await result(page)).data.value,'Concurrent title');
   await external(page,'update_attribute',{id:target.id,attribute:'createdAt',value:'Forged'});assert.equal((await result(page)).error.code,'invalid');
   // Leaf editing/navigation uses Save/Discard/Cancel, and stale form edits survive.
   await page.reload();await ready(page);await page.getByRole('button',{name:'Lists',exact:true}).click();await page.locator('#navigation').getByRole('button',{name:'All items',exact:true}).click();

@@ -5,7 +5,8 @@ const configure = require('./harness-ui.cjs');
 let browser;
 const origin = process.env.APP_URL || 'http://127.0.0.1:8767';
 async function ready(page) {
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#workspace').hidden || [...document.querySelectorAll('#startup-actions button')].some(button => button.textContent === 'Continue'));
+  if (await page.locator('#startup').isVisible()) await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.locator('#workspace').waitFor({ state: 'visible' });
 }
 async function open(options = {}, viewport = { width: 1280, height: 900 }) {
@@ -61,7 +62,7 @@ async function send(page, text) { await page.locator('#message').fill(text); awa
 
 async function layoutAndNavigation() {
   const { context, page } = await open();
-  for (const width of [1280, 1920]) {
+  for (const width of [851, 1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     const measured = await page.evaluate(() => {
       const box = selector => document.querySelector(selector).getBoundingClientRect();
@@ -91,7 +92,10 @@ async function layoutAndNavigation() {
 async function rememberedPermissionsAndStorage() {
   const { context, page } = await open();
   assert.equal((await info(page)).diagnostics.IndexedDB.action, 'created');
-  await startExternal(page, 'create_item', { title: 'Remembered first item' }); await approve(page, 'Always allow create_item'); assert.equal((await externalResult(page)).ok, true);
+  await page.setViewportSize({ width: 851, height: 900 });
+  await startExternal(page, 'create_item', { title: 'Remembered first item' }); await page.locator('#approval').waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Narrow desktop permission controls fit');
+  await approve(page, 'Always allow create_item'); assert.equal((await externalResult(page)).ok, true);
   assert.deepEqual((await data(page)).settings.allowedTools, ['create_item']);
   await page.reload(); await ready(page); assert.equal((await info(page)).diagnostics.IndexedDB.action, 'opened-existing');
   await startExternal(page, 'create_item', { title: 'Remembered after reload' }); assert.equal((await externalResult(page)).ok, true); assert.equal(await page.locator('#approval').isVisible(), false);
@@ -99,6 +103,9 @@ async function rememberedPermissionsAndStorage() {
   await startExternal(page, 'create_item', { title: 'Remembered after new chat' }); assert.equal((await externalResult(page)).ok, true);
   const first = (await data(page)).items.find(item => item.title === 'Remembered first item');
   await startExternal(page, 'update_item', { id: first.id, patch: { context: '@Unapproved' } }); await page.locator('#approval').waitFor({ state: 'visible' }); await approve(page, 'Deny'); assert.equal((await externalResult(page)).ok, false); assert.equal((await data(page)).items.find(item => item.id === first.id).context, '');
+  await startExternal(page, 'list_attributes', {}); await approve(page, 'Allow for this chat'); assert.equal((await externalResult(page)).ok, true);
+  await startExternal(page, 'list_attributes', {}); assert.equal((await externalResult(page)).ok, true); assert.equal(await page.locator('#approval').isVisible(), false);
+  await startExternal(page, 'read_item', { id: first.id }); await page.locator('#approval').waitFor({ state: 'visible' }); await approve(page, 'Deny'); assert.equal((await externalResult(page)).ok, false, 'A chat grant for list_attributes cannot approve read_item');
   await startExternal(page, 'delete_item', { id: first.id }); await approve(page, 'Always allow delete_item');
   await page.getByRole('heading', { name: 'Permanently delete this subtree?', exact: true }).waitFor();
   assert.match(await page.locator('#approval').innerText(), /Permanently delete/); await approve(page, 'Allow delete (1)'); assert.equal((await externalResult(page)).ok, true);
@@ -115,8 +122,23 @@ async function rememberedPermissionsAndStorage() {
     const { openDatabase, read, put } = await import('./storage.js'); const db = await openDatabase(() => {});
     const saved = await read(db, 'preferences', 'settings'); await put(db, 'preferences', { ...saved, allowedTools: [] }); db.close();
   });
+  await page.locator('#theme-button').click();
+  assert.deepEqual((await data(page)).settings.allowedTools, [], 'A stale tab theme save cannot resurrect a revoked tool grant');
   await startExternal(page, 'create_item', { title: 'Must ask after DB revocation' }); await page.locator('#approval').waitFor({ state: 'visible' }); await approve(page, 'Deny'); assert.equal((await externalResult(page)).ok, false);
   assert.equal((await data(page)).items.some(item => item.title === 'Must ask after DB revocation'), false);
+  await context.close();
+}
+async function returningDownloadConsent() {
+  const { context, page } = await open();
+  await page.evaluate(() => localStorage.setItem('returning-consent-probe', 'saved'));
+  await context.addInitScript(() => { fixture.options.availability = 'downloadable'; });
+  await page.reload(); await page.getByRole('button', { name: 'Download and continue', exact: true }).waitFor();
+  assert.equal(await page.locator('#workspace').isVisible(), false);
+  assert.equal(await page.evaluate(() => fixture.creates), 0, 'Returning visits cannot silently trigger a model download');
+  await page.getByRole('button', { name: 'Not now', exact: true }).click();
+  assert.equal(await page.evaluate(() => fixture.creates), 0);
+  await page.getByRole('button', { name: 'Download and continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' });
+  assert.equal((await info(page)).diagnostics.IndexedDB.action, 'opened-existing');
   await context.close();
 }
 async function keyboardFocus() {
@@ -126,6 +148,22 @@ async function keyboardFocus() {
   await page.locator('#message').fill('First line'); await page.locator('#message').press('Shift+Enter'); assert.equal(await page.locator('#message').inputValue(), 'First line\n'); assert.equal(await page.locator('#send').isEnabled(), true);
   await enqueue(page, false, [tool('capture_tasks', { titles: ['Focus after approval'] })]); await send(page, 'Capture exact title: "Focus after approval".'); await approve(page); await idle(page);
   assert.equal(await page.locator('#message').evaluate(node => document.activeElement === node), true); assert.equal((await data(page)).items.length, 1);
+  await context.close();
+}
+async function clarificationCancellation() {
+  const { context, page } = await open(); await seedQuestions(page);
+  await page.evaluate(async () => {
+    const { openDatabase, mutate } = await import('./storage.js'); const db = await openDatabase(() => {});
+    await mutate(db, { kind: 'create', patch: { title: 'House repairs', type: 'Project' } }); db.close();
+  });
+  await page.reload(); await ready(page);
+  await send(page, 'Move Inspect boiler to a Project. Ask which before changing it.'); await idle(page);
+  await page.locator('#user-question').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#user-question').getByRole('button', { name: 'House repairs', exact: true }).isVisible(), true);
+  await page.keyboard.press('Escape'); assert.equal(await page.locator('#user-question').isVisible(), false);
+  assert.equal(await page.locator('#message').evaluate(node => document.activeElement === node), true);
+  const before = await data(page); await enqueue(page, false, [reply('Please restate what you want to change.')]); await send(page, 'House repairs'); await idle(page);
+  assert.deepEqual((await data(page)).items, before.items); assert.equal(await page.locator('#user-question').isVisible(), false);
   await context.close();
 }
 async function missingFeatureHelp() {
@@ -149,6 +187,7 @@ async function questionFlows() {
     for (const custom of [false, true]) {
       const answer = custom ? 'A different topic / @Home' : 'Inspect boiler';
       await enqueue(page, native, [tool('ask_user', question), reply(`You answered: ${answer}`)]); const before = await data(page); await send(page, custom ? 'Ask me which task to discuss first.' : 'Help me choose a topic.');
+      if (!custom) await approve(page, 'Always allow ask_user');
       await page.locator('#user-question').waitFor({ state: 'visible' }); assert.equal(await page.locator('#send').isEnabled(), false);
       if (custom) { await page.locator('#question-answer').fill(answer); await page.getByRole('button', { name: 'Send answer', exact: true }).click(); }
       else await page.locator('#user-question').getByRole('button', { name: answer, exact: true }).click();
@@ -168,7 +207,7 @@ async function questionFlows() {
       assert.deepEqual((await data(page)).items, before.items); assert.deepEqual(await page.evaluate(() => fixture.executions), []);
       assert.equal(await page.locator('#user-question').isVisible(), false);
       await enqueue(page, false, [tool('capture_tasks', { titles: ['One finite capture'] }), tool('ask_user', question)]);
-      await send(page, 'Capture exact title: "One finite capture".'); await idle(page);
+      await send(page, 'Capture exact title: "One finite capture".'); await approve(page, 'Always allow capture_tasks'); await idle(page);
       assert.deepEqual(await page.evaluate(() => fixture.executions.map(entry => entry.name)), ['capture_tasks']); assert.equal(await page.locator('#user-question').isVisible(), false);
       assert.equal((await data(page)).items.filter(item => item.title === 'One finite capture').length, 1);
       await context.close(); continue;
@@ -178,7 +217,7 @@ async function questionFlows() {
     const reference = `Item ${index + 1}: ${target.title} (${target.type})`;
     await enqueue(page, native, [tool('ask_user', { question: 'Use the exact requested context?', options: ['Use supplied literal', 'Cancel'] }), tool('update_item', { id: reference, patch: { context: '@Home / repairs' } }), reply('Acknowledged.')]);
     await send(page, 'Set the context of Inspect boiler to "@Home / repairs".'); await page.locator('#user-question').waitFor({ state: 'visible' }); assert.equal((await data(page)).items.find(item => item.id === target.id).context, '@Initial');
-    await page.locator('#user-question').getByRole('button', { name: 'Use supplied literal', exact: true }).click(); await idle(page);
+    await page.locator('#user-question').getByRole('button', { name: 'Use supplied literal', exact: true }).click(); await approve(page, 'Always allow update_item'); await idle(page);
     assert.equal((await data(page)).items.find(item => item.id === target.id).context, '@Home / repairs'); assert.deepEqual(await page.evaluate(() => fixture.executions.map(entry => entry.name)), ['ask_user', 'update_item']);
     await enqueue(page, native, [tool('ask_user', { question: 'Proceed with the exact context?', options: ['Yes', 'No'] }), reply('No changes were made.'), tool('update_item', { id: reference, patch: { context: '@Must not save' } })]);
     const negativeBefore = await data(page); await send(page, 'Set the context of Inspect boiler to "@Must not save".'); await page.locator('#user-question').waitFor({ state: 'visible' }); await page.locator('#user-question').getByRole('button', { name: 'No', exact: true }).click(); await idle(page);
@@ -188,7 +227,7 @@ async function questionFlows() {
     assert.deepEqual((await data(page)).items, before.items); assert.deepEqual(await page.evaluate(() => fixture.executions.map(entry => entry.name)), ['ask_user']); assert.equal(await page.locator('#approval').isVisible(), false);
     if (native) await configure(page, { native: true });
     await enqueue(page, native, [tool('capture_tasks', { titles: ['One finite capture'] }), tool('ask_user', question)]);
-    await send(page, 'Capture exact title: "One finite capture".'); await idle(page);
+    await send(page, 'Capture exact title: "One finite capture".'); await approve(page, 'Always allow capture_tasks'); await idle(page);
     assert.deepEqual(await page.evaluate(() => fixture.executions.map(entry => entry.name)), ['capture_tasks']); assert.equal(await page.locator('#user-question').isVisible(), false);
     assert.equal((await data(page)).items.filter(item => item.title === 'One finite capture').length, 1);
     if (native) {
@@ -201,6 +240,6 @@ async function questionFlows() {
 }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
-  await layoutAndNavigation(); await rememberedPermissionsAndStorage(); await keyboardFocus(); await missingFeatureHelp(); await questionFlows();
+  await layoutAndNavigation(); await rememberedPermissionsAndStorage(); await returningDownloadConsent(); await keyboardFocus(); await clarificationCancellation(); await missingFeatureHelp(); await questionFlows();
   await browser.close(); console.log('Usability passed: proportional desktop panels, mobile switching, navigation/Tools return, keyboard focus, remembered per-tool permissions/revoke/deletion confirmation, version-only storage setup, startup help, and bounded model question/answer/cancellation flows in both adapters.');
 })().catch(async error => { console.error(error); await browser?.close(); process.exitCode = 1; });

@@ -9,12 +9,12 @@ async function open(responses) {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   await context.addInitScript(fixture, { legacyArguments: true });
   const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
+  await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
   await page.evaluate(responses => fixture.responses.push(...responses), responses);
   return { context, page };
 }
 async function send(page, text = 'Save two Inbox thoughts: first thought and second thought.') { await page.locator('#message').fill(text); await page.locator('#send').click(); }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function data(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return await read(db, 'items'); } finally { db.close(); } }); }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });

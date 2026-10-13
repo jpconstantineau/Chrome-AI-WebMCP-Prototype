@@ -3,7 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const fixture = require('./browser-fixture.cjs');
 const configureHarness = require('./harness-ui.cjs');
 let browser;
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function allow(page, choice = 'Allow once') {
   await page.waitForFunction(() => !document.querySelector('#send').disabled || [...document.querySelectorAll('#approval button')].some(button => button.textContent === 'Allow once'));
   if (!(await page.locator('#send').isEnabled())) await page.getByRole('button', { name: choice, exact: true }).click();
@@ -28,7 +28,7 @@ async function data(page) { return page.evaluate(async () => { const { openDatab
     const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options);
     const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8765');
     async function ready() {
-      await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
+      await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
       await page.evaluate(() => {
         let serial = 0;
         fixture.call = (name, args) => fixture.options.nativeToolUse ? [{ type: 'tool-call', value: new LanguageModelToolCall({ [fixture.options.idKey]: `weekly-${++serial}`, name, arguments: args }) }] : { message: '', tool: { name, arguments: args } };

@@ -12,10 +12,10 @@ async function savedReview(page) {
   });
 }
 async function ready(page) {
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await require('./startup-ui.cjs')(page);
   await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
 }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function guidanceHasNoProgressTool(page, native) {
   assert.equal(await page.evaluate(() => fixture.prompts.length), 0, 'Trusted weekly guidance requires no model/tool inference');
   assert.equal(await page.evaluate(() => fixture.executions.length), 0);

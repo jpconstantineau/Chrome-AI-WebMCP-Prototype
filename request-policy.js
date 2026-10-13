@@ -48,9 +48,13 @@ function requestedCreation(text, items) {
   const separator = masked.slice(prefix[0].length).match(/\s+(?:to|under|in)\s+/iu);
   if (!separator) return null;
   const boundary = prefix[0].length + separator.index;
-  const title = literalName(text.slice(prefix[0].length, boundary)), destination = literalName(text.slice(boundary + separator[0].length));
+  const rawDestination = text.slice(boundary + separator[0].length).trim();
+  const title = literalName(text.slice(prefix[0].length, boundary)), destination = literalName(rawDestination);
   if (!title?.trim() || title.length > 200 || !destination?.trim()) return { question: 'Please give the exact item title and destination.' };
-  if (/^(?:the\s+)?areas?\s+of\s+responsibilit(?:y|ies)$/iu.test(destination)) return { creation: { title, type: 'Area of Responsibility', status: 'Open', parentId: null }, parentRecords: [] };
+  const group = destination.replace(/^the\s+/iu, '').toLowerCase();
+  const groupType = /^(?:areas?|areas? of responsibilit(?:y|ies))$/u.test(group) ? 'Area of Responsibility' : /^(?:projects?|roles?|checklists?)$/u.test(group) ? ({ project: 'Project', role: 'Role', checklist: 'Checklist' })[group.replace(/s$/u, '')] : null;
+  const literalParents = items.filter(item => item.type !== 'Task' && item.title.toLowerCase() === destination.toLowerCase());
+  if (groupType && !(/^["“]/u.test(rawDestination) && literalParents.length)) return { creation: { title, type: groupType, status: 'Open', parentId: null }, parentRecords: [] };
   if (/^(?:the\s+)?Inbox$/iu.test(destination)) return { creation: { title, type: 'Task', status: 'Open', parentId: null }, parentRecords: [] };
   // Purchases retain their dedicated list workflow, not generic item creation.
   if (/^(?:the\s+)?(?:shopping\s+lists?|groceries)$/iu.test(destination)) return null;

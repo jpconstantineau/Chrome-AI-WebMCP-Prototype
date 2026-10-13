@@ -35,6 +35,23 @@ export function put(db, name, value, clear = false) {
     tx.onabort = tx.onerror = () => reject(tx.error || new Error('Storage write failed.'));
   });
 }
+// Ordinary view/theme saves must not overwrite permissions from another tab.
+// Permission changes and the preference write share one serialized transaction.
+export function savePreferences(db, value, permissionChange = null) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('preferences', 'readwrite'), store = tx.objectStore('preferences');
+    let saved;
+    const request = store.get('settings');
+    request.onsuccess = () => {
+      let allowedTools = Array.isArray(request.result?.allowedTools) ? request.result.allowedTools : [];
+      if (permissionChange?.allow) allowedTools = [...new Set([...allowedTools, permissionChange.allow])];
+      else if (permissionChange && Object.hasOwn(permissionChange, 'revoke')) allowedTools = permissionChange.revoke ? allowedTools.filter(name => name !== permissionChange.revoke) : [];
+      saved = { ...value, id: 'settings', allowedTools }; store.put(saved);
+    };
+    tx.oncomplete = () => resolve(saved);
+    tx.onabort = tx.onerror = () => reject(tx.error || new Error('Preference write failed.'));
+  });
+}
 export function snapshot(items) { return items.map(item => [item.id, item.updatedAt]).sort(([a], [b]) => a.localeCompare(b)); }
 function reviewTransaction(db, expectedSnapshot, signal, update) {
   return new Promise((resolve, reject) => {

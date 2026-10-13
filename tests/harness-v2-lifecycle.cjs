@@ -7,10 +7,10 @@ const URL = process.env.APP_URL || 'http://127.0.0.1:8765';
 async function open(options = {}, prepare = true) {
   const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, options);
   const page = await context.newPage(); await page.goto(URL);
-  if (prepare) { await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); }
+  if (prepare) { await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); }
   return { page, context };
 }
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function send(page, request) { await page.locator('#message').fill(request); await page.locator('#send').click(); }
 async function facts(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return { items: await read(db, 'items'), review: await read(db, 'reviews', 'weekly') }; } finally { db.close(); } }); }
 async function diagnostics(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
@@ -29,8 +29,8 @@ async function diagnostics(page) { if (await page.getByRole('heading', { name: '
     let passed = JSON.parse(await page.locator('#content > pre').first().innerText()); assert.equal(passed.nativeCanaryReady, true); assert.equal(passed.diagnostics['native-feedback'].outcome, 'pass');
     await page.getByRole('button', { name: 'Use native proposals', exact: true }).click(); assert.match((await diagnostics(page)).modelToolLoop, /Native/);
     assert.equal((await facts(page)).items.length, 0); assert.equal(await page.evaluate(() => fixture.maxLive), 2);
-    await page.reload(); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); passed = await diagnostics(page);
-    assert.equal(passed.nativeCanaryReady, false); assert.equal(passed.toolPermission, 'Ask on use'); assert.equal(passed.modelToolLoop, 'Constrained JSON bridge');
+    await page.reload(); await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); passed = await diagnostics(page);
+    assert.equal(passed.nativeCanaryReady, false); assert.deepEqual(passed.toolPermission, { chatTools: [], rememberedTools: [], otherTools: 'Ask on use' }); assert.equal(passed.modelToolLoop, 'Constrained JSON bridge');
     await context.close();
   }
   for (const options of [{}, { nativeToolUse: true, canaryResponse: [{ type: 'text', value: 'No tool needed.' }] }, { nativeToolUse: true, canaryResponse: [{ type: 'tool-call', value: { callId: 'bad', name: 'create_item', arguments: { title: 'Unauthorized' } } }] }, { nativeToolUse: true, nativeAvailability: 'unavailable' }, { nativeToolUse: true, canaryError: true }]) {

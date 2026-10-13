@@ -3,7 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const fixture = require('./browser-fixture.cjs');
 const configure = require('./harness-ui.cjs');
 let browser;
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); await idle(page); }
 async function facts(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); const items = await read(db, 'items'); db.close(); return items; }); }
 async function call(page, native, name, arguments_) {
@@ -13,7 +13,7 @@ async function call(page, native, name, arguments_) {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   for (const native of [false, true]) {
     const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, { nativeToolUse: native });
-    const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
+    const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
     await page.evaluate(async () => { const { openDatabase, mutate, read } = await import('./storage.js'); const db = await openDatabase(() => {}); for (const patch of [{ title: 'Paint hall', context: '@Initial' }, { title: 'Call painter', status: 'Waiting For' }, { title: 'Home', type: 'Project' }, { title: 'Home improvements', type: 'Project' }]) await mutate(db, { kind: 'create', patch }); fixture.seed = await read(db, 'items'); db.close(); window.grant = document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(tool => tool.name === 'list_attributes'), {})); });
     await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await page.evaluate(() => grant); await page.evaluate(() => { fixture.executions = []; });
     let ref = await page.evaluate(() => ['Paint hall', 'Call painter', 'Home', 'Home improvements'].map(title => { const index = fixture.seed.findIndex(item => item.title === title); const item = fixture.seed[index]; return `Item ${index + 1}: ${item.title} (${item.type})`; }));

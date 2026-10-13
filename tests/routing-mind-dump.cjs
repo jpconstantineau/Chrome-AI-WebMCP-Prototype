@@ -3,7 +3,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 const fixture = require('./browser-fixture.cjs');
 const configure = require('./harness-ui.cjs');
 let browser;
-async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
+async function idle(page) { await require('./finish-turn.cjs')(page); }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); }
 async function items(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); const result = await read(db, 'items'); db.close(); return result; }); }
 async function enqueue(page, native, groups) { await page.evaluate(({ native, groups }) => { for (const [index, titles] of groups.entries()) fixture.responses.push(native ? [{ type: 'tool-call', value: new LanguageModelToolCall({ callId: `dump-${index}-${crypto.randomUUID()}`, name: 'capture_tasks', arguments: { titles } }) }] : { message: '', tool: { name: 'capture_tasks', arguments: { titles } } }); if (native) fixture.responses.push([{ type: 'text', value: 'Acknowledged.' }]); }, { native, groups }); }
@@ -11,7 +11,7 @@ async function enqueue(page, native, groups) { await page.evaluate(({ native, gr
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   const original = ['Compare car insurance', 'Book a test drive', 'Renew my passport', 'Chase kitchen quote', 'Research options for a new car', 'Sketch a reading nook layout'];
   for (const native of [false, true]) for (const titles of [original, ['Find hiking boots', 'Plan a picnic']]) {
-    const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, { nativeToolUse: native }); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
+    const context = await browser.newContext({ serviceWorkers: 'block' }); await context.addInitScript(fixture, { nativeToolUse: native }); const page = await context.newPage(); await page.goto(process.env.APP_URL || 'http://127.0.0.1:8767'); await require('./startup-ui.cjs')(page); await page.locator('#workspace').waitFor({ state: 'visible' }); await configure(page);
     const request = `Here is my mind dump. Capture these exact titles: ${titles.map(title => JSON.stringify(title)).join(', ')}.`;
     await enqueue(page, native, [titles]); await send(page, request); await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await idle(page);
     assert.deepEqual((await items(page)).map(item => item.title).sort(), [...titles].sort()); assert.equal(await page.evaluate(() => fixture.executions.length), 1); assert.equal(await page.evaluate(() => fixture.prompts.length), native ? 2 : 1); assert.doesNotMatch(await page.locator('#chat').innerText(), /repeated proposal|Request failed/);

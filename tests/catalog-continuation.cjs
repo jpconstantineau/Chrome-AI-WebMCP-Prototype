@@ -11,7 +11,7 @@ let browser;
     const context = await browser.newContext({ serviceWorkers: 'block' });
     await context.addInitScript(fixture, options);
     const page = await context.newPage(); await page.goto(URL);
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await require('./startup-ui.cjs')(page);
     await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page);
     await page.evaluate(async () => {
       const { openDatabase, put } = await import('./storage.js');
