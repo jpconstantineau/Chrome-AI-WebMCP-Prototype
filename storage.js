@@ -1,10 +1,11 @@
 import { validateItem, descendants, fail, planWorkflow, planReview } from './workspace.js';
 export const DB_NAME = 'chrome-ai-webmcp-prototype';
-export function openDatabase(onClose) {
+export function openDatabase(onClose, onUpgrade = () => {}) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 2);
     let rejected = false;
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = event => {
+      onUpgrade({ oldVersion: event.oldVersion, newVersion: event.newVersion });
       const db = request.result;
       for (const name of ['preferences', 'history', 'items', 'reviews']) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id', ...(name === 'history' ? { autoIncrement: true } : {}) });
     };

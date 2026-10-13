@@ -10,7 +10,7 @@ async function open() {
 }
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function data(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return { items: await read(db, 'items'), review: await read(db, 'reviews', 'weekly') }; } finally { db.close(); } }); }
-async function info(page) { await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
+async function info(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   for (const scope of ['inbox', 'project']) {

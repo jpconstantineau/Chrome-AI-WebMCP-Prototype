@@ -52,6 +52,7 @@ const taskTitles = { type: 'array', items: { ...str(), minLength: 1 }, minItems:
 export const WORKFLOW_TOOLS = ['add_shopping_item', 'complete_task', 'capture_tasks', 'organize_tasks', 'set_task_status'];
 export const REVIEW_ACTIONS = ['start', 'resume', 'complete_step', 'skip_step', 'back', 'pause'];
 export const TOOLS = [
+  ['ask_user', 'Ask the user a brief question when clarification is needed. Supply two to eight readable answer buttons; the user may instead type a different answer. The answer is returned to the conversation and never grants permission or changes stored items.', schema({ question: { ...str(400), minLength: 1 }, options: { type: 'array', items: { ...str(120), minLength: 1 }, minItems: 2, maxItems: 8, uniqueItems: true } }, ['question', 'options']), true],
   ['capture_tasks', 'Capture a mind dump as Inbox Tasks, at most twenty titles. Existing exact Inbox Tasks are reused without duplicates; a completed Inbox Task is reopened to Open so the recaptured commitment is visible. Only status changes when reopening; other existing attributes stay intact. Never organize, complete, or delete during capture.', schema({ titles: taskTitles, context: fields.context }, ['titles']), false],
   ['organize_tasks', 'Move named existing Tasks into an existing parent (parentId, or null for Inbox), or a new Project named newProjectTitle. Specify exactly one destination. All tasks resolve before any move; ambiguity returns a question. Descendants, status, description and context are preserved.', { ...schema({ titles: taskTitles, parentId: parentSchema, newProjectTitle: { ...str(), minLength: 1 } }, ['titles']), oneOf: [{ required: ['parentId'], not: { required: ['newProjectTitle'] } }, { required: ['newProjectTitle'], not: { required: ['parentId'] } }] }, false],
   ['set_task_status', 'Change only the status of an existing Task named by title. Status can be Open, In Progress, Completed, Waiting For, or Blocked. Ambiguous/missing titles return a question; an already matching status is a no-op.', schema({ title: { ...str(), minLength: 1 }, status: fields.status }, ['title', 'status']), false],
@@ -60,7 +61,7 @@ export const TOOLS = [
   ['complete_task', 'Mark an existing Task completed by its title. Resolve exact title first. Ambiguous or missing tasks return a clarification question without changing anything. Changes only status; never creates or deletes a task.', schema({ title: { ...str(), minLength: 1 } }, ['title']), false],
   ['list_items', 'Find existing items and their IDs by type or title search. Search Shopping List containers before adding purchases; search Tasks before marking them completed. parentId selects children of a list. Omitted parentId searches all items; null filters root records of any type/status. scope inbox selects only unfinished parentless Tasks. Filters combine conjunctively.', schema({ scope: { type: 'string', enum: ['inbox'] }, parentId: parentSchema, type: fields.type, ...filters, limit: { type: 'integer', minimum: 1, maximum: 100 } }), true],
   ['read_item', 'Read one item and its immediate child IDs.', schema({ id: idSchema }, ['id']), true],
-  ['create_item', 'Create a Task for a thing to do or buy. A purchase such as Bananas is type Task, with parentId set to the actual Shopping List ID. To create the container itself, use type Shopping List and a container title such as Shopping List or Groceries. Find or create that container before adding its Task. Defaults: Task, Open, Inbox.', schema(fields, ['title']), false],
+  ['create_item', 'Create a named item with its intended type and parent. Areas of responsibility, Projects, Roles, Checklists and Shopping Lists are containers: use that type for the container itself. Adding a task to an existing named container creates type Task with that parentId; never substitute Inbox or a Shopping List. A purchase belongs under its Shopping List. Preserve the supplied title. Defaults when unspecified: Task, Open, Inbox.', schema(fields, ['title']), false],
   ['update_item', 'Update editable attributes of an existing item.', schema({ id: idSchema, patch: { ...schema(fields), minProperties: 1 } }, ['id', 'patch']), false],
   ['delete_item', 'Permanently delete an item and all descendants. Always requires explicit app confirmation.', schema({ id: idSchema }, ['id']), false],
   ['list_attributes', 'List attributes, allowed types/statuses and parent rules.', schema({}), true],
@@ -94,7 +95,13 @@ export function validateTool(name, args) {
   validateSchema(args, tool.inputSchema);
   if (name === 'show_view' && (Object.hasOwn(args, 'view') === Object.hasOwn(args, 'itemId'))) fail('Choose exactly one view or itemId.');
   if (name === 'organize_tasks' && (Object.hasOwn(args, 'parentId') === Object.hasOwn(args, 'newProjectTitle'))) fail('Choose exactly one parentId or newProjectTitle destination.');
+  if (name === 'ask_user' && (!args.question.trim() || args.options.some(option => !option.trim()) || new Set(args.options.map(option => option.trim().toLowerCase())).size !== args.options.length)) fail('Provide a readable question and distinct readable options.');
   return args;
+}
+export function validateUserAnswer(args, answer) {
+  validateTool('ask_user', args);
+  if (typeof answer !== 'string' || !answer.trim() || answer.length > 8000) fail('Provide an answer of at most 8000 characters.');
+  return { question: args.question, answer };
 }
 function normalizedTitle(title) { return title.trim().replace(/\s+/gu, ' ').toLowerCase(); }
 export function planWorkflow(name, args, items) {
@@ -194,7 +201,7 @@ export function decoderSchema(value, profile = 'chromium-compatibility') {
   if (!DECODER_PROFILES.includes(profile)) fail('Unknown decoder profile.');
   if (Array.isArray(value)) return value.map(item => decoderSchema(item, profile));
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !['oneOf', 'not', 'minProperties', ...(profile === 'chromium-compatibility' ? ['description'] : [])].includes(key)).map(([key, item]) => [key, key === 'properties' ? Object.fromEntries(Object.entries(item).map(([name, definition]) => [name, decoderSchema(definition, profile)])) : decoderSchema(item, profile)]));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !['oneOf', 'not', 'minProperties', 'uniqueItems', ...(profile === 'chromium-compatibility' ? ['description'] : [])].includes(key)).map(([key, item]) => [key, key === 'properties' ? Object.fromEntries(Object.entries(item).map(([name, definition]) => [name, decoderSchema(definition, profile)])) : decoderSchema(item, profile)]));
 }
 export const RESPONSE_SCHEMA = schema({ message: { type: 'string', maxLength: 8000 }, tool: { anyOf: [{ type: 'null' }, ...TOOLS.map(tool => schema({ name: { type: 'string', enum: [tool.name] }, arguments: decoderSchema(tool.inputSchema) }, ['name', 'arguments']))] } }, ['message', 'tool']);
 export function parseEnvelope(text) {

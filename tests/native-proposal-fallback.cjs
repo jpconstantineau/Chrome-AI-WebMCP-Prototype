@@ -26,7 +26,7 @@ async function data(page) {
   });
 }
 async function diagnostics(page) {
-  await page.locator('#tools-button').click();
+  if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click();
   return JSON.parse(await page.locator('#content > pre').first().innerText());
 }
 async function noFallback(page, expectedCreates) {
@@ -81,7 +81,7 @@ async function noFallback(page, expectedCreates) {
     });
     await diagnostics(page); await page.getByRole('button', { name: 'Use JSON proposals', exact: true }).click();
     assert.equal(await page.locator('#workspace').isVisible(), true);
-    assert.equal(await page.evaluate(() => fixture.tools.size), 16);
+    assert.equal(await page.evaluate(() => fixture.tools.size), 17);
     await page.evaluate(() => { fixture.options.nativeToolUse = false; });
     const after = await page.evaluate(async () => {
       const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {});
@@ -116,7 +116,7 @@ async function noFallback(page, expectedCreates) {
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.locator('#workspace').waitFor({ state: 'visible' }); await configureHarness(page, { resetTrace: false });
     assert.equal(await page.evaluate(() => fixture.prompts.length), prompts, 'Preparation must not replay the failed request');
-    assert.equal(await page.evaluate(() => fixture.tools.size), 16);
+    assert.equal(await page.evaluate(() => fixture.tools.size), 17);
     assert.deepEqual((await data(page)).map(item => item.title), ['Saved before model failure']);
     const info = await diagnostics(page); assert.equal(info.modelToolLoop, 'Constrained JSON bridge'); assert.match(info.nativeProposalFailure, /First inference failed/);
     await page.evaluate(() => fixture.responses.push({ message: '', tool: { name: 'capture_tasks', arguments: { titles: ['Recovered thought'] } } }, { message: 'Saved.', tool: null }));

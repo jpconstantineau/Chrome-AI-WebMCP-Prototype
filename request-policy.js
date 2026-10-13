@@ -35,6 +35,29 @@ function targetChoices(text, items) {
   return matches;
 }
 function ask(question, pending = null) { return { steps: [], question, pending }; }
+function literalName(text) {
+  const value = text.trim();
+  if (value.startsWith('"')) { try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : null; } catch { return null; } }
+  if (value.startsWith('“')) return /^“[^”]*”$/u.test(value) ? value.slice(1, -1) : null;
+  return value;
+}
+function requestedCreation(text, items) {
+  const masked = text.replace(/"(?:[^"\\]|\\.)*"|“[^”]*”/gu, value => '_'.repeat(value.length));
+  const prefix = masked.match(/^\s*(?:please\s+)?(?:add|create)\s+/iu);
+  if (!prefix) return null;
+  const separator = masked.slice(prefix[0].length).match(/\s+(?:to|under|in)\s+/iu);
+  if (!separator) return null;
+  const boundary = prefix[0].length + separator.index;
+  const title = literalName(text.slice(prefix[0].length, boundary)), destination = literalName(text.slice(boundary + separator[0].length));
+  if (!title?.trim() || title.length > 200 || !destination?.trim()) return { question: 'Please give the exact item title and destination.' };
+  if (/^(?:the\s+)?areas?\s+of\s+responsibilit(?:y|ies)$/iu.test(destination)) return { creation: { title, type: 'Area of Responsibility', status: 'Open', parentId: null }, parentRecords: [] };
+  if (/^(?:the\s+)?Inbox$/iu.test(destination)) return { creation: { title, type: 'Task', status: 'Open', parentId: null }, parentRecords: [] };
+  // Purchases retain their dedicated list workflow, not generic item creation.
+  if (/^(?:the\s+)?(?:shopping\s+lists?|groceries)$/iu.test(destination)) return null;
+  const matches = items.filter(item => item.type !== 'Task' && item.title.toLowerCase() === destination.toLowerCase());
+  if (matches.length !== 1) return { question: matches.length ? `Several containers are named ${destination}. Please specify which parent and restate the task to add.` : `I cannot find a container named ${destination}. Which existing container should receive ${title}?` };
+  return { creation: { title, type: 'Task', status: 'Open', parentId: matches[0].id }, parentRecords: matches };
+}
 export function analyzeRequest(text, items, review = null, pending = null) {
   if (pending) {
     if (/^\s*(?:(?:please\s+)?(?:use|choose|move it to|put it in)\s+)?Inbox\s*[.!]?\s*$/iu.test(text)) {
@@ -88,7 +111,11 @@ export function analyzeRequest(text, items, review = null, pending = null) {
     let step = { source: part, targets, inert: !mutation.test(semantics) && !/\b(?:show|list|count|how many|working on|in progress|waiting)\b/iu.test(semantics) };
     if (new Set(targets.map(item => item.title)).size !== targets.length && mutation.test(semantics)) return ask('Several tasks match that title. Please specify its parent before changing anything.');
     const reviewMention = /\b(?:weekly\s+review|(?:this|my|the)\s+review|(?:current|this|review|that)\s+(?:weekly\s+|review\s+)?step)\b/iu.test(semantics);
-    if ((reviewMention || review && !targets.length && /\b(?:next|move on|advance|move to (?:the )?(?:mind dump|action lists))\b/iu.test(semantics)) && /\b(?:complete|done|finished|finish|move on|move to|advance|next|start|resume|pause|skip|back)\b/iu.test(semantics)) {
+    const creation = requestedCreation(part, items);
+    if (creation?.question) return ask(creation.question);
+    if (creation) { step = { ...step, ...creation, targets: [], operation: 'create_item' }; }
+    else if (/^\s*(?:please\s+)?ask\s+(?:me|the user)\b/iu.test(semantics)) { step.operation = 'ask_user'; step.targets = []; }
+    else if ((reviewMention || review && !targets.length && /\b(?:next|move on|advance|move to (?:the )?(?:mind dump|action lists))\b/iu.test(semantics)) && /\b(?:complete|done|finished|finish|move on|move to|advance|next|start|resume|pause|skip|back)\b/iu.test(semantics)) {
       step.operation = 'weekly_review'; step.targets = []; step.action = /\bresume\b/iu.test(semantics) ? 'resume' : /\bpause\b/iu.test(semantics) ? 'pause' : /\bstart\b/iu.test(semantics) ? 'start' : /\bskip\b/iu.test(semantics) ? 'skip_step' : /\bback\b/iu.test(semantics) ? 'back' : 'complete_step'; step.review = JSON.stringify(review);
     } else if (/\bcontext(?:\s+field|\s+value)?\b/iu.test(semantics) && /\b(?:set|update|change|clear|remove|empty)\b/iu.test(semantics)) {
       const value = contextSlot; if (value.question) return ask(value.question);
@@ -140,15 +167,16 @@ export function analyzeRequest(text, items, review = null, pending = null) {
     if (!step.targets?.length || remainingTargets.length) { if (step.targets?.length) step.targets = remainingTargets; distinct.push(step); }
   }
   steps.splice(0, steps.length, ...distinct);
-  if (steps.some(step => step.operation && !['weekly_review', 'list_items', 'read_item', 'show_view'].includes(step.operation))) { deferredReview = steps.some(step => step.operation === 'weekly_review'); if (deferredReview) steps.splice(0, steps.length, ...steps.filter(step => step.operation !== 'weekly_review')); }
+  if (steps.some(step => step.operation && !['ask_user', 'weekly_review', 'list_items', 'read_item', 'show_view'].includes(step.operation))) { deferredReview = steps.some(step => step.operation === 'weekly_review'); if (deferredReview) steps.splice(0, steps.length, ...steps.filter(step => step.operation !== 'weekly_review')); }
   if (!steps.length && protectedOnly) return ask('No changes were requested. I kept the existing values.');
   return { steps: steps.length ? steps : [{ operation: null, source: text, targets: [] }], deferredReview };
 }
 
 export function plannedCatalog(base, step, snapshot, review, revisions = new Map()) {
   const contextChoice = Object.hasOwn(step, 'context') && base.project(step.context) !== step.context ? 'Exact context value supplied by you' : step.context;
-  const tools = base.tools.filter(tool => (!step.operation || tool.name === step.operation) && (step.operation || mutation.test(step.source) || tool.annotations?.readOnlyHint || ['list_items', 'read_item', 'list_attributes', 'read_attribute', 'show_view'].includes(tool.name))).map(tool => {
+  const tools = base.tools.filter(tool => (!step.operation || tool.name === step.operation || base.allowQuestions && tool.name === 'ask_user') && (step.operation || mutation.test(step.source) || tool.annotations?.readOnlyHint || ['ask_user', 'list_items', 'read_item', 'list_attributes', 'read_attribute', 'show_view'].includes(tool.name))).map(tool => {
     const inputSchema = structuredClone(tool.inputSchema), p = inputSchema.properties;
+    if (tool.name === 'create_item' && step.creation) { inputSchema.properties = Object.fromEntries(Object.entries(step.creation).map(([key, value]) => [key, { type: value === null ? 'null' : 'string', enum: [base.project(value)] }])); inputSchema.required = Object.keys(step.creation); }
     const titles = step.targets?.map(item => base.project(item.title));
     if (titles?.length && p.title && tool.name !== 'add_shopping_item') p.title.enum = [...new Set(titles)];
     if (titles?.length && p.titles) { p.titles.items.enum = [...new Set(titles)]; p.titles.minItems = p.titles.maxItems = new Set(titles).size; }
@@ -157,7 +185,7 @@ export function plannedCatalog(base, step, snapshot, review, revisions = new Map
       const key = Object.hasOwn(step, 'parentId') ? 'parentId' : 'newProjectTitle', value = key === 'parentId' ? base.project(step.parentId) : base.project(step.newProjectTitle);
       inputSchema.properties = { titles: p.titles, [key]: { type: value === null ? 'null' : 'string', enum: [value] } }; inputSchema.required = ['titles', key]; delete inputSchema.anyOf;
     }
-    if (Object.hasOwn(step, 'context')) {
+    if (tool.name === 'update_item' && Object.hasOwn(step, 'context')) {
       const id = base.project(step.targets[0].id);
       inputSchema.properties = { id: { type: 'string', enum: [id] }, patch: { type: 'object', properties: { context: { type: 'string', enum: [contextChoice], maxLength: 200 } }, required: ['context'], additionalProperties: false } }; inputSchema.required = ['id', 'patch'];
     }
@@ -166,10 +194,15 @@ export function plannedCatalog(base, step, snapshot, review, revisions = new Map
     return { ...tool, inputSchema };
   });
   return { ...base, tools, resolve(call, fresh = snapshot) {
-    if (!tools.some(tool => tool.name === call.name) || step.operation && call.name !== step.operation) fail('The proposal does not match the requested operation.');
+    if (!tools.some(tool => tool.name === call.name) || step.operation && call.name !== step.operation && !(base.allowQuestions && call.name === 'ask_user')) fail('The proposal does not match the requested operation.');
+    if (call.name === 'ask_user') return base.resolve(call, fresh);
     if (step.action && JSON.stringify(review()) !== step.review) fail('The current review step changed. Make a fresh request.', 'stale');
     if (step.targets?.some(old => signature(old) !== signature(fresh.find(item => item.id === old.id)))) fail('The requested task changed. Make a fresh request.', 'stale');
     const args = call.arguments;
+    if (step.creation) {
+      if (Object.keys(args).sort().join(',') !== Object.keys(step.creation).sort().join(',') || Object.entries(step.creation).some(([key, value]) => args[key] !== base.project(value))) fail('Create only the exact requested title, type, status and parent.');
+      if (step.parentRecords?.some(old => signature(old) !== signature(fresh.find(item => item.id === old.id)) || fresh.filter(item => item.type !== 'Task' && item.title.toLowerCase() === old.title.toLowerCase()).length !== 1)) fail('The destination changed or became ambiguous. Please make a fresh request.', 'stale');
+    }
     if (Object.hasOwn(step, 'context') && (Object.keys(args).sort().join(',') !== 'id,patch' || Object.keys(args.patch || {}).join(',') !== 'context' || args.patch.context !== contextChoice || args.id !== base.project(step.targets[0].id))) fail('Only the exact requested context may change.');
     if (step.targets?.length && args.title && !step.targets.some(item => base.project(item.title) === args.title)) fail('The proposal selected an unrequested task.');
     if (step.targets?.length && args.titles && (args.titles.length !== new Set(step.targets.map(item => item.title)).size || new Set(args.titles).size !== args.titles.length || args.titles.some(title => !step.targets.some(item => base.project(item.title) === title)))) fail('Choose exactly the requested tasks.');
@@ -180,6 +213,7 @@ export function plannedCatalog(base, step, snapshot, review, revisions = new Map
     const compatible = fresh.map(item => revisions.get(item.id)?.original || item);
     let restored = Object.hasOwn(step, 'context') ? { ...call, arguments: { ...args, patch: { context: step.context } } } : call;
     const resolved = base.resolve(restored, compatible);
+    if (step.creation) resolved.arguments.title = step.creation.title;
     if (step.captureTitles?.length) resolved.arguments.titles = args.titles.map(title => step.captureTitles.find(actual => base.project(actual) === title));
     if (Object.hasOwn(step, 'newProjectTitle')) resolved.arguments.newProjectTitle = step.newProjectTitle;
     validateTool(resolved.name, resolved.arguments);

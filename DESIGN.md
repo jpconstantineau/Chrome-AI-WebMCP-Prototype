@@ -1,11 +1,11 @@
 ---
 version: alpha
 name: Composio-design-analysis
-description: A developer-tools brand for AI-agent tool integration whose marketing surfaces lean into a dark, technical aesthetic with a single deep-electric-blue voltage (`#0007cd`). The page floor is near-black (`#0f0f0f`); cards float above on subtle gray-tinted surfaces. abcDiatype carries display and body in a single sans family with weights 400-600. The brand's strongest visual signature is a four-pane terminal-style mockup (a 2×2 grid of dark code/output panels) with a central blue spotlight glow — used as the homepage hero anchor.
+description: A developer-tools brand for AI-agent tool integration whose marketing surfaces lean into a dark, technical aesthetic with a single deep-electric-blue voltage (`#1456f0`). The page floor is near-black (`#0f0f0f`); cards float above on subtle gray-tinted surfaces. abcDiatype carries display and body in a single sans family with weights 400-600. The brand's strongest visual signature is a four-pane terminal-style mockup (a 2×2 grid of dark code/output panels) with a central blue spotlight glow — used as the homepage hero anchor.
 
 colors:
-  primary: "#0007cd"
-  primary-active: "#0005a3"
+  primary: "#1456f0"
+  primary-active: "#1d4ed8"
   primary-glow: "#1a26ff"
   ink: "#ffffff"
   body: "#a8a8a8"
@@ -22,7 +22,7 @@ colors:
   surface-strong: "#2a2a2a"
   on-primary: "#ffffff"
   on-dark: "#ffffff"
-  accent-cyan: "#00d4ff"
+  accent-cyan: "#3daeff"
   accent-violet: "#7b3aed"
   semantic-error: "#ff4d4d"
   semantic-success: "#33d17a"
@@ -259,14 +259,14 @@ components:
 
 ## Overview
 
-Composio's marketing site reads like a serious developer-infrastructure brand — closer to Vercel or Stripe Docs in atmosphere than to a typical AI-tools startup. The base canvas is a near-black `{colors.canvas}` (#0f0f0f) holding white type and a single voltage of **deep electric blue** (`{colors.primary}` — #0007cd) carrying every primary CTA, brand wordmark, and atmospheric spotlight glow that backs the homepage hero.
+Composio's marketing site reads like a serious developer-infrastructure brand — closer to Vercel or Stripe Docs in atmosphere than to a typical AI-tools startup. The base canvas is a near-black `{colors.canvas}` (#0f0f0f) holding white type and a single voltage of **deep electric blue** (`{colors.primary}` — #1456f0) carrying every primary CTA, brand wordmark, and atmospheric spotlight glow that backs the homepage hero.
 
 Type runs **abcDiatype** as the single sans family across display, body, navigation, and captions. Display sits at weight 500 — confident but not bombastic. Code blocks and terminal mockups switch to JetBrains Mono.
 
 The page rhythm is monolithic: dark canvas top to bottom with subtle elevation steps via card surfaces. The brand's strongest visual signature is a **four-pane terminal-style mockup** — a 2×2 grid of dark code/output panels with a central blue spotlight glow behind them.
 
 **Key Characteristics:**
-- Single accent: `{colors.primary}` (#0007cd) for primary CTAs, wordmark, spotlight glows.
+- Single accent: `{colors.primary}` (#1456f0) for primary CTAs, wordmark, spotlight glows.
 - Single sans family: abcDiatype carries everything except code (JetBrains Mono).
 - Dark monolithic canvas: `{colors.canvas}` runs top to bottom; depth from `{colors.surface-card}` and `{colors.surface-card-elevated}` brightness steps.
 - Terminal-mockup hero: 2×2 grid of code/output panes is the brand signature.
@@ -277,10 +277,10 @@ The page rhythm is monolithic: dark canvas top to bottom with subtle elevation s
 ## Colors
 
 ### Brand & Accent
-- **Composio Blue** (`{colors.primary}` — #0007cd): Primary CTAs, wordmark, spotlight glow center.
-- **Composio Blue Active** (`{colors.primary-active}` — #0005a3): Press state.
+- **Composio Blue** (`{colors.primary}` — #1456f0): Primary CTAs, wordmark, spotlight glow center.
+- **Composio Blue Active** (`{colors.primary-active}` — #1d4ed8): Press state.
 - **Spotlight Glow Tone** (`{colors.primary-glow}` — #1a26ff): Brighter blue used inside radial atmospheric glows.
-- **Accent Cyan** (`{colors.accent-cyan}` — #00d4ff): Sparingly on data-flow visualizations.
+- **Accent Cyan** (`{colors.accent-cyan}` — #3daeff): Sparingly on data-flow visualizations.
 - **Accent Violet** (`{colors.accent-violet}` — #7b3aed): Inside specific product illustrations only.
 
 ### Surface

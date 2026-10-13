@@ -19,6 +19,7 @@
     <div id="startup-actions" class="actions"></div>
     <p class="muted">Your lists and chat stay in this browser. Clearing site data removes them.</p>
     <p class="help"><a href="https://developer.chrome.com/docs/ai/prompt-api" target="_blank" rel="noopener">Prompt API setup</a> · <a href="https://developer.chrome.com/docs/ai/webmcp/imperative-api" target="_blank" rel="noopener">WebMCP setup</a></p>
+    <details class="help" id="setup-help"><summary>Chrome setup instructions</summary><p>Use desktop Chrome with HTTPS or localhost. If WebMCP is missing, open <code>chrome://flags/#enable-webmcp-testing</code>, select Enabled, relaunch Chrome, then reload this page.</p><p>If the Prompt API is missing, update Chrome and check its Prompt API support. Experimental builds may expose <code>chrome://flags/#prompt-api-for-gemini-nano</code> (or a Prompt API flag) and <code>chrome://flags/#optimization-guide-on-device-model</code>; enable the available feature flags and relaunch. Flag names vary by Chrome version.</p><p>If the local model is unavailable, check the supported desktop operating system, free disk space, hardware and Chrome policy requirements in the linked Prompt API guide. Use an unmetered connection for the initial download. Inspect <code>chrome://on-device-internals</code> for model status.</p><p><code>chrome://flags/#prompt-api-tool-use</code> is optional for experimental native model proposals. The default JSON bridge works without it. Chrome does not expose flag values to this page; these checks detect available APIs, not the cause of a missing API.</p></details>
   </section>
   <div id="workspace" hidden>
     <header class="topbar">
@@ -34,6 +35,7 @@
         <div id="review-card"></div>
         <div id="chat" role="log" aria-label="Conversation" aria-live="polite"></div>
         <div id="approval" hidden></div>
+        <div id="user-question" hidden></div>
         <form id="composer"><label for="message">Message the local assistant</label><textarea id="message" rows="3" maxlength="8000" placeholder="Help me clarify my Inbox…"></textarea><div class="actions"><button id="send" class="primary">Send</button><button id="stop" type="button" hidden>Stop</button><button id="retry-message" type="button" hidden>Retry message</button><button id="continue-message" type="button" hidden>Continue turn</button></div><p class="muted small">Enter to send · Shift+Enter for a new line</p></form>
       </aside>
     </div>

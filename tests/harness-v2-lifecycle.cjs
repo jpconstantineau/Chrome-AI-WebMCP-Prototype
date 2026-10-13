@@ -13,13 +13,13 @@ async function open(options = {}, prepare = true) {
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function send(page, request) { await page.locator('#message').fill(request); await page.locator('#send').click(); }
 async function facts(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return { items: await read(db, 'items'), review: await read(db, 'reviews', 'weekly') }; } finally { db.close(); } }); }
-async function diagnostics(page) { await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
+async function diagnostics(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   {
     const { page, context } = await open({ nativeToolUse: true });
     const info = await diagnostics(page); assert.equal(info.modelToolLoop, 'Constrained JSON bridge'); assert.equal(info.nativeCanaryReady, false); assert.equal(info.catalogProfile, 'standard');
-    assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools), undefined); assert.equal(await page.evaluate(() => fixture.tools.size), 16);
+    assert.equal(await page.evaluate(() => fixture.modelSettings[0].tools), undefined); assert.equal(await page.evaluate(() => fixture.tools.size), 17);
     // A root chat grant cannot bypass scoped canary consent.
     await page.evaluate(() => { window.external = document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(tool => tool.name === 'list_attributes'), {})); });
     await page.getByRole('button', { name: 'Allow for this chat', exact: true }).click(); await page.evaluate(() => external);

@@ -1,7 +1,7 @@
 // Existing primitive/native fixtures use the same idle-only production controls as a human.
 module.exports = async function configureHarness(page, { full = true, native = null, resetTrace = true } = {}) {
   if (native === null) native = await page.evaluate(() => !!fixture.options.nativeToolUse);
-  await page.locator('#tools-button').click();
+  if (!(await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible())) await page.locator('#tools-button').click();
   if (full) await page.locator('#catalog-profile').selectOption('full');
   if (native) {
     await page.getByRole('button', { name: 'Test native tool calls', exact: true }).click();

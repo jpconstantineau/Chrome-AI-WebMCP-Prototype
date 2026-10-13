@@ -1,5 +1,5 @@
 import { inInbox, fail } from './workspace.js';
-export const STANDARD_TOOLS = Object.freeze(['capture_tasks', 'organize_tasks', 'set_task_status', 'weekly_review', 'add_shopping_item', 'complete_task', 'list_items', 'read_item', 'show_view', 'create_item', 'update_item', 'delete_item']);
+export const STANDARD_TOOLS = Object.freeze(['capture_tasks', 'organize_tasks', 'set_task_status', 'weekly_review', 'add_shopping_item', 'complete_task', 'list_items', 'read_item', 'show_view', 'create_item', 'update_item', 'delete_item', 'ask_user']);
 export function catalogProfile(name = 'standard') { if (!['standard', 'full'].includes(name)) fail('Unknown catalog profile.'); return name === 'full' ? null : STANDARD_TOOLS; }
 export function closedTurns(history) {
   const turns = []; let current = null;

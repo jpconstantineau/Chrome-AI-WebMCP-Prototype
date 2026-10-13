@@ -23,7 +23,7 @@ async function open(native, completionGrant = false) {
 async function idle(page) { await page.waitForFunction(() => !document.querySelector('#send').disabled); }
 async function send(page, text) { await page.locator('#message').fill(text); await page.locator('#send').click(); await idle(page); }
 async function records(page) { return page.evaluate(async () => { const { openDatabase, read } = await import('./storage.js'); const db = await openDatabase(() => {}); try { return await read(db, 'items'); } finally { db.close(); } }); }
-async function info(page) { await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
+async function info(page) { if (await page.getByRole('heading', { name: 'Tools & diagnostics', exact: true }).isVisible()) await page.locator('#tools-button').click(); await page.locator('#tools-button').click(); return JSON.parse(await page.locator('#content > pre').first().innerText()); }
 (async () => {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'chrome', headless: true });
   for (const native of [false, true]) {

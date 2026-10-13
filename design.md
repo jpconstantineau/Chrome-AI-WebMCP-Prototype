@@ -1,10 +1,10 @@
 version: alpha
 name: Composio-design-analysis
-description: A developer-tools brand for AI-agent tool integration whose marketing surfaces lean into a dark, technical aesthetic with a single deep-electric-blue voltage (`#0007cd`). The page floor is near-black (`#0f0f0f`); cards float above on subtle gray-tinted surfaces. abcDiatype carries display and body in a single sans family with weights 400-600. The brand's strongest visual signature is a four-pane terminal-style mockup (a 2×2 grid of dark code/output panels) with a central blue spotlight glow — used as the homepage hero anchor.
+description: A developer-tools brand for AI-agent tool integration whose marketing surfaces lean into a dark, technical aesthetic with a single deep-electric-blue voltage (`#1456f0`). The page floor is near-black (`#0f0f0f`); cards float above on subtle gray-tinted surfaces. abcDiatype carries display and body in a single sans family with weights 400-600. The brand's strongest visual signature is a four-pane terminal-style mockup (a 2×2 grid of dark code/output panels) with a central blue spotlight glow — used as the homepage hero anchor.
 
 colors:
-  primary: "#0007cd"
-  primary-active: "#0005a3"
+  primary: "#1456f0"
+  primary-active: "#1d4ed8"
   primary-glow: "#1a26ff"
   ink: "#ffffff"
   body: "#a8a8a8"
@@ -21,7 +21,7 @@ colors:
   surface-strong: "#2a2a2a"
   on-primary: "#ffffff"
   on-dark: "#ffffff"
-  accent-cyan: "#00d4ff"
+  accent-cyan: "#3daeff"
   accent-violet: "#7b3aed"
   semantic-error: "#ff4d4d"
   semantic-success: "#33d17a"
